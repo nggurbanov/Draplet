@@ -23,6 +23,8 @@ var animationFrom = 0.0
 var animationTarget = 0.0
 var animationDuration = 0.18
 var animationRunning = false
+var animationFrameCount = 0
+var animationFirstFrameDelay: Double?
 var manualUntil = Date.distantPast
 var timer: Timer?
 var activationObserver: NSObjectProtocol?
@@ -167,11 +169,12 @@ func setReveal(_ open: Bool, _ reason: String, animated: Bool = true) {
     let target = open ? 1.0 : 0.0
     if revealed == open && (animated || view.progress == target) { return }
     revealed = open
-    updateClickTarget()
     animationFrom = view.progress
     animationTarget = target
     animationStart = ProcessInfo.processInfo.systemUptime
     animationDuration = open ? 0.18 : 0.16
+    animationFrameCount = 0
+    animationFirstFrameDelay = nil
     animationRunning = animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion && abs(target - view.progress) > 0.001
     if !animationRunning { view.progress = target; animationTimer?.invalidate(); animationTimer = nil }
     else if animationTimer == nil {
@@ -179,19 +182,25 @@ func setReveal(_ open: Bool, _ reason: String, animated: Bool = true) {
         animationTimer = frames
         RunLoop.main.add(frames, forMode: .common)
     }
+    updateClickTarget()
     emit(open ? "revealing" : "covering", ["reason": reason, "animated": animationRunning,
          "from": animationFrom, "windowNumber": panel?.windowNumber ?? 0])
 }
 
 func animate() {
     guard animationRunning, let view = panel?.contentView as? CoverView else { return }
-    let t = min(1, (ProcessInfo.processInfo.systemUptime - animationStart) / animationDuration)
+    let elapsed = ProcessInfo.processInfo.systemUptime - animationStart
+    if animationFrameCount == 0 { animationFirstFrameDelay = elapsed }
+    animationFrameCount += 1
+    let t = min(1, elapsed / animationDuration)
     let eased = animationTarget > animationFrom ? 1 - pow(1 - t, 3) : t * t * (3 - 2 * t)
     view.progress = animationFrom + (animationTarget - animationFrom) * eased
+    updateClickTarget()
     if t >= 1 {
         animationRunning = false
         animationTimer?.invalidate(); animationTimer = nil
         emit(revealed ? "revealed" : "covered", ["transitionSeconds": ProcessInfo.processInfo.systemUptime - animationStart,
+             "frames": animationFrameCount, "firstFrameSeconds": animationFirstFrameDelay ?? 0,
              "panelVisible": panel?.isVisible ?? false, "windowNumber": panel?.windowNumber ?? 0])
     }
 }
@@ -364,7 +373,19 @@ func updateClickTarget() {
     guard enabled, panel?.isVisible == true,
           let view = panel?.contentView as? CoverView else { clickPanel?.orderOut(nil); return }
     let width = min((view.applicationName as NSString).size(withAttributes: [.font: view.font]).width, coverFrame.width - 45)
-    let frame = Self.indicatorFrame(cover: coverFrame, titleWidth: width, menuEnd: view.menuEnd, expanded: revealed)
+    let closedFrame = Self.indicatorFrame(cover: coverFrame, titleWidth: width, menuEnd: view.menuEnd, expanded: false)
+    let openFrame = Self.indicatorFrame(cover: coverFrame, titleWidth: width, menuEnd: view.menuEnd, expanded: true)
+    let progress = min(1, max(0, view.progress))
+    let frame: NSRect
+    if openFrame.minX >= closedFrame.minX {
+        // Ride the wipe rather than teleporting onto File before it is covered.
+        frame = NSRect(x: closedFrame.minX + (openFrame.minX - closedFrame.minX) * progress,
+                       y: closedFrame.minY, width: closedFrame.width + (openFrame.width - closedFrame.width) * progress,
+                       height: closedFrame.height)
+    } else {
+        // Never slide the full-width-menu fallback across the Apple/app title.
+        frame = progress > 0 ? openFrame : closedFrame
+    }
     if clickPanel == nil {
         let hit = CoverPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         hit.level = coverLevel

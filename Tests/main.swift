@@ -60,6 +60,49 @@ check(tightArrow.minX == 630 && tightArrow.width >= 14 && tightArrow.maxX <= cov
 let fullMenuArrow = LeftCurtain.indicatorFrame(cover: cover, titleWidth: 100, menuEnd: cover.width, expanded: true)
 check(fullMenuArrow.maxX <= cover.minX && fullMenuArrow.minX >= 0,
       "A full menu bar keeps its toggle in the empty Apple-menu padding rather than covering Help")
+// Exercise the actual collapse callback on an offscreen panel. The arrow must
+// not jump onto File before the first frame of the covering animation.
+if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+    let curtain = LeftCurtain()
+    let testFrame = NSRect(x: -4000, y: 0, width: 602.5, height: 33)
+    let testPanel = LeftCurtain.CoverPanel(contentRect: testFrame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+    testPanel.isReleasedWhenClosed = false
+    let testView = LeftCurtain.CoverView(frame: NSRect(origin: .zero, size: testFrame.size))
+    testView.applicationName = "T3 Code (Beta)"
+    testView.menuStart = 118; testView.menuEnd = 377; testView.progress = 1
+    testPanel.contentView = testView
+    curtain.coverFrame = testFrame; curtain.panel = testPanel
+    curtain.enabled = true; curtain.revealed = true
+    testPanel.orderFrontRegardless()
+    curtain.updateClickTarget()
+    let expandedX = curtain.clickPanel!.frame.minX
+    curtain.indicatorClicked()
+    check(curtain.animationRunning && testView.progress == 1 && curtain.clickPanel!.frame.minX == expandedX,
+          "Click-collapse starts at the expanded arrow position, preserving the first visible animation frame")
+    curtain.animationStart = ProcessInfo.processInfo.systemUptime - curtain.animationDuration / 2
+    curtain.animate()
+    check(testView.progress > 0 && testView.progress < 1 && curtain.clickPanel!.frame.minX < expandedX,
+          "The collapse button moves with an intermediate covering frame")
+    curtain.animationStart = ProcessInfo.processInfo.systemUptime - curtain.animationDuration
+    curtain.animate()
+    check(!curtain.animationRunning && testView.progress == 0 && curtain.clickPanel!.isVisible,
+          "Animated collapse finishes with a visible clickable toggle")
+    let collapsedX = curtain.clickPanel!.frame.minX
+    testView.progress = 1; curtain.revealed = true
+    curtain.updateClickTarget()
+    (curtain.clickPanel!.contentView!.subviews.first as! NSButton).performClick(nil)
+    RunLoop.main.run(until: Date().addingTimeInterval(0.24))
+    check(!curtain.animationRunning && curtain.animationFrameCount >= 4 && testView.progress == 0,
+          "A real NSButton collapse delivers multiple timer frames through to completion")
+    check((curtain.animationFirstFrameDelay ?? 1) < curtain.animationDuration / 2,
+          "Button tracking does not delay the first frame until the collapse is already over")
+    testView.progress = 1; curtain.revealed = true
+    curtain.updateClickTarget()
+    curtain.setReveal(false, "test-app-switch", animated: false)
+    check(testView.progress == 0 && curtain.clickPanel!.frame.minX == collapsedX,
+          "An immediate app-switch cover also puts its toggle in the closed position immediately")
+    curtain.stop()
+}
 let items = Items(), reader = Inventory(), bridge = Visibility()
 let engine = NativeVisibilityEngine(items: items, inventory: reader, visibility: bridge,
                                     ownBundleIdentifier: "own", itemFrame: { _ in frame(600) }, isLTR: { true })
