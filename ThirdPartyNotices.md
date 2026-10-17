@@ -4,6 +4,8 @@ The files in `Vendor/HiddenBar` are from https://github.com/dwarvesf/hidden,
 commit `47937b9d8aede0325ca87a7880af13433e7c5cf8`, licensed under MIT.
 Copyright (c) 2019 Dwarves Foundation; individual source headers also credit 2026.
 The complete license is in `Vendor/HiddenBar/LICENSE` and included in the app.
+The original `ic_expand.png` and `ic_collapse.png` artwork in `Resources/HiddenBar`
+is from the same project and license; its preset is named "Hidden Bar" as homage.
 
 Local modification: add bounded Accessibility messaging timeouts to the extras
 menu bar and individual status items, as well as their owning application.

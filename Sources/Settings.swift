@@ -26,9 +26,37 @@ struct SettingsView: View {
                         Button("Grant Accessibility Access…", action: requestPermission)
                     }
                 }
+                Section("Icons") {
+                    Toggle("Use the same icon on both sides", isOn: Binding(get: { prefs.sameIcons }, set: { prefs.linkIcons($0) }))
+                    if prefs.sameIcons {
+                        iconPicker("Both sides", selection: $prefs.sharedIcon, hasCustom: prefs.sharedCustomIcon != nil)
+                        Button("Choose Custom Icon…") { IndicatorIcons.importIcon(prefs: prefs, side: nil) }
+                        if prefs.sharedCustomIcon != nil { Button("Remove Custom Icon") { prefs.removeCustomIcon(side: nil) } }
+                    } else {
+                        iconPicker("Left", selection: $prefs.leftIcon, hasCustom: prefs.leftCustomIcon != nil)
+                        Button("Choose Left Icon…") { IndicatorIcons.importIcon(prefs: prefs, side: .left) }
+                        if prefs.leftCustomIcon != nil { Button("Remove Left Custom Icon") { prefs.removeCustomIcon(side: .left) } }
+                        iconPicker("Right", selection: $prefs.rightIcon, hasCustom: prefs.rightCustomIcon != nil)
+                        Button("Choose Right Icon…") { IndicatorIcons.importIcon(prefs: prefs, side: .right) }
+                        if prefs.rightCustomIcon != nil { Button("Remove Right Custom Icon") { prefs.removeCustomIcon(side: .right) } }
+                    }
+                    Text("The Hidden Bar preset uses its original artwork, with thanks. Custom icons are saved in Draplet; a transparent PNG or PDF works best.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Section("Reveal") {
+                    Toggle("Use the same reveal action on both sides", isOn: Binding(get: { prefs.sameTrigger }, set: { prefs.linkTriggers($0) }))
+                    if prefs.sameTrigger {
+                        triggerPicker("Reveal on", selection: $prefs.sharedTrigger)
+                    } else {
+                        triggerPicker("Left", selection: $prefs.leftTrigger)
+                        triggerPicker("Right", selection: $prefs.rightTrigger)
+                    }
+                    Text("Click an arrow to reveal or hide, or choose Hover for automatic reveal. The left arrow moves after the menus while open so every native menu stays clickable.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Section("Application menus · Left") {
-                    Toggle("Hide application menus until hover", isOn: $prefs.leftEnabled)
-                    Text("The app name stays visible. Move over the left menu bar to reveal its menus.")
+                    Toggle("Hide application menus", isOn: $prefs.leftEnabled)
+                    Text("The Apple logo and app name stay visible. Native menus remain fully clickable when revealed.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section("Status icons · Right") {
@@ -39,7 +67,6 @@ struct SettingsView: View {
                     }
                     Text("⌘-drag icons left of Draplet’s arrow to hide them, or right to keep them visible. Right-click the arrow for settings.")
                         .font(.caption).foregroundStyle(.secondary)
-                    Toggle("Reveal when hovering over the arrow", isOn: $prefs.hoverRight)
                     Toggle("Automatically hide after leaving", isOn: $prefs.autoCollapse)
                     HStack {
                         Text("Hide after")
@@ -73,11 +100,26 @@ struct SettingsView: View {
                 }
                 if !prefs.error.isEmpty { Text(prefs.error).foregroundStyle(.red).font(.caption) }
                 Section {
-                    Text("Draplet 0.1.0 · Free and open source\nRight-side hiding includes code from Hidden Bar, © Dwarves Foundation, under the MIT license.")
+                    Text("Draplet 0.2.0 · Free and open source\nRight-side hiding and the Hidden Bar icons include work by Dwarves Foundation, under the MIT license.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }.formStyle(.grouped)
         }.frame(width: 560, height: 740)
+    }
+    private func iconPicker(_ title: String, selection: Binding<IndicatorStyle>, hasCustom: Bool) -> some View {
+        Picker(title, selection: selection) {
+            ForEach(IndicatorStyle.allCases.filter { $0 != .custom || hasCustom }, id: \.self) { style in
+                HStack {
+                    if style != .custom { Image(nsImage: IndicatorIcons.image(style: style)).frame(width: 18) }
+                    Text(style.title)
+                }.tag(style)
+            }
+        }
+    }
+    private func triggerPicker(_ title: String, selection: Binding<RevealTrigger>) -> some View {
+        Picker(title, selection: selection) {
+            ForEach(RevealTrigger.allCases, id: \.self) { trigger in Text(trigger.title).tag(trigger) }
+        }.pickerStyle(.segmented)
     }
 }
 

@@ -12,6 +12,8 @@ xcrun swiftc -O -swift-version 5 -D HIDDENBAR_NATIVE_VISIBILITY \
 cp Resources/Info.plist .build/Draplet.app/Contents/Info.plist
 cp LICENSE ThirdPartyNotices.md .build/Draplet.app/Contents/Resources/
 cp Vendor/HiddenBar/LICENSE .build/Draplet.app/Contents/Resources/HiddenBar-LICENSE
+mkdir -p .build/Draplet.app/Contents/Resources/HiddenBar
+cp Resources/HiddenBar/*.png .build/Draplet.app/Contents/Resources/HiddenBar/
 if [ -f Resources/Draplet.icns ]; then cp Resources/Draplet.icns .build/Draplet.app/Contents/Resources/; fi
 identity="${DRAPLET_SIGNING_IDENTITY:--}"
 if [ "$identity" = "-" ]; then

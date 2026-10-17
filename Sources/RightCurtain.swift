@@ -9,11 +9,14 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
     lazy var engine = MenuBarEngineFactory.make(items: self)
     private let prefs = Preferences.shared
     private var collapseTimer: Timer?
-    private var hoverEntered: Date?
     private var lastCollapse = Date.distantPast
     private var separatorsHidden = true
     private var revealAllMode = false
     private var stopped = false
+    private var configuration = ""
+    private var hoverTimer: Timer?
+    private var mouseMonitor: Any?
+    private var localMouseMonitor: Any?
     var onSettings: (() -> Void)?
     var onPause: (() -> Void)?
     var onRevealAll: (() -> Void)?
@@ -39,6 +42,10 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
         configure()
     }
     func configure() {
+        updateHoverMonitor()
+        let next = "\(canManage)-\(prefs.alwaysHidden)-\(prefs.autoCollapse)-\(prefs.collapseDelay)-\(prefs.fullWidth)"
+        guard next != configuration else { updatePresentation(); return }
+        configuration = next
         collapseTimer?.invalidate()
         engine.expand()
         if prefs.alwaysHidden && alwaysHiddenItem == nil {
@@ -57,7 +64,7 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
     }
     func updatePresentation() {
         let collapsed = engine.state == .collapsed
-        toggleItem.button?.image = NSImage(systemSymbolName: collapsed ? "chevron.left" : "chevron.right", accessibilityDescription: "Draplet")
+        toggleItem.button?.image = IndicatorIcons.image(for: .right, expanded: !collapsed)
         toggleItem.button?.toolTip = "Draplet · Click to \(collapsed ? "reveal" : "hide") icons · Right-click for settings"
         if !prefs.rightEnabled || prefs.paused { prefs.rightStatus = "Paused" }
         else if competingApp != nil { prefs.rightStatus = "Waiting for Hidden Bar to quit" }
@@ -158,14 +165,36 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
         }
     }
     func tick() {
-        guard canManage, prefs.hoverRight, engine.state == .collapsed else { hoverEntered = nil; return }
+        guard canManage, prefs.trigger(for: .right) == .hover, engine.state == .collapsed else { cancelHover(); return }
         guard let frame = toggleItem.button?.window?.frame,
-              frame.insetBy(dx: -12, dy: -3).contains(NSEvent.mouseLocation) else { hoverEntered = nil; return }
-        if hoverEntered == nil { hoverEntered = Date() }
-        if Date().timeIntervalSince(hoverEntered!) > 0.35 && Date().timeIntervalSince(lastCollapse) > 0.5 { expand() }
+              frame.insetBy(dx: -3, dy: -3).contains(NSEvent.mouseLocation) else { cancelHover(); return }
+        guard hoverTimer == nil, Date().timeIntervalSince(lastCollapse) > 0.5 else { return }
+        let timer = Timer(timeInterval: 0.08, repeats: false) { [weak self] _ in
+            guard let self else { return }; self.hoverTimer = nil
+            guard self.canManage, self.prefs.trigger(for: .right) == .hover, self.engine.state == .collapsed,
+                  let frame = self.toggleItem.button?.window?.frame,
+                  frame.insetBy(dx: -3, dy: -3).contains(NSEvent.mouseLocation) else { return }
+            self.expand()
+        }
+        hoverTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+    private func cancelHover() { hoverTimer?.invalidate(); hoverTimer = nil }
+    private func updateHoverMonitor() {
+        if canManage && prefs.trigger(for: .right) == .hover {
+            if mouseMonitor == nil { mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: .mouseMoved) { [weak self] _ in self?.tick() } }
+            if localMouseMonitor == nil { localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: .mouseMoved) { [weak self] event in self?.tick(); return event } }
+        } else {
+            cancelHover()
+            if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor); self.mouseMonitor = nil }
+            if let localMouseMonitor { NSEvent.removeMonitor(localMouseMonitor); self.localMouseMonitor = nil }
+        }
     }
     func stop() {
         guard !stopped else { return }; stopped = true
+        cancelHover()
+        if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor) }
+        if let localMouseMonitor { NSEvent.removeMonitor(localMouseMonitor) }
         collapseTimer?.invalidate()
         engine.updateAlwaysHiddenSection(enabled: false, separatorHidden: false)
         engine.expand()

@@ -2,7 +2,7 @@ import AppKit
 import ApplicationServices
 
 // The approved prototype, retained with its geometry, typography, and easing.
-final class LeftCurtain {
+final class LeftCurtain: NSObject {
 let started = Date()
 let coverLevel = NSWindow.Level.statusBar
 var panel: NSPanel?
@@ -29,6 +29,10 @@ var activationObserver: NSObjectProtocol?
 var animationTimer: Timer?
 var mouseMonitor: Any?
 var enabled = false
+var clickPanel: CoverPanel?
+var manuallyCollapsed = false
+var onSettings: (() -> Void)?
+private let prefs = Preferences.shared
 
 func frameJSON(_ r: CGRect) -> [String: Double] {
     ["x": r.minX, "y": r.minY, "width": r.width, "height": r.height]
@@ -84,15 +88,6 @@ final class CoverView: NSView {
         // Native menu titles sit on this pixel-aligned baseline at 2× scale.
         name.draw(in: NSRect(x: 10.5, y: (bounds.height - size.height) / 2 + 1,
                              width: width + 1, height: size.height), withAttributes: attributes)
-        let x = width + 24.5
-        let mid = bounds.midY
-        let chevron = NSBezierPath()
-        chevron.move(to: NSPoint(x: x, y: mid - 3))
-        chevron.line(to: NSPoint(x: x + 3, y: mid))
-        chevron.line(to: NSPoint(x: x, y: mid + 3))
-        chevron.lineWidth = 1.4
-        NSColor(white: 0.55, alpha: max(0, 1 - progress * 5)).setStroke()
-        chevron.stroke()
     }
 }
 
@@ -172,6 +167,7 @@ func setReveal(_ open: Bool, _ reason: String, animated: Bool = true) {
     let target = open ? 1.0 : 0.0
     if revealed == open && (animated || view.progress == target) { return }
     revealed = open
+    updateClickTarget()
     animationFrom = view.progress
     animationTarget = target
     animationStart = ProcessInfo.processInfo.systemUptime
@@ -205,6 +201,7 @@ func updateTitle() {
           front.processIdentifier != currentPID else { return }
     let wasVisible = panel?.isVisible ?? false
     currentPID = front.processIdentifier
+    manuallyCollapsed = false
     currentApp = front.localizedName ?? "Application"
     if let view = panel?.contentView as? CoverView {
         view.applicationName = currentApp
@@ -214,13 +211,14 @@ func updateTitle() {
     }
     menuIsTracking = false
     lastMenuCheck = .distantPast
-    if coverFrame.insetBy(dx: -3, dy: -3).contains(NSEvent.mouseLocation) {
+    if prefs.trigger(for: .left) == .hover && coverFrame.insetBy(dx: -3, dy: -3).contains(NSEvent.mouseLocation) {
         lastInside = Date()
         setReveal(true, "pointer-in-menu")
     } else if !paused {
         lastInside = .distantPast
         setReveal(false, "app-switch", animated: false)
     }
+    updateClickTarget()
     panel?.displayIfNeeded()
     emit("title", ["title": currentApp, "fixedFrame": frameJSON(coverFrame),
                    "visibleBefore": wasVisible, "visibleAfter": panel?.isVisible ?? false,
@@ -259,10 +257,13 @@ func tick() {
     if now < manualUntil { return }
     let tolerance: CGFloat = revealed ? 9 : 3
     let inside = coverFrame.insetBy(dx: -tolerance, dy: -tolerance).contains(NSEvent.mouseLocation)
+        || (clickPanel?.frame.contains(NSEvent.mouseLocation) == true)
+    if !inside { manuallyCollapsed = false }
+    if menuIsTracking && !manuallyCollapsed { lastInside = now; setReveal(true, "menu-open") }
     if inside {
         if enteredAt == nil { enteredAt = now }
         lastInside = now
-        if now.timeIntervalSince(enteredAt!) >= 0.045 || NSEvent.pressedMouseButtons != 0 {
+        if !manuallyCollapsed && prefs.trigger(for: .left) == .hover && (now.timeIntervalSince(enteredAt!) >= 0.08 || NSEvent.pressedMouseButtons != 0) {
             setReveal(true, "pointer-in-menu")
         }
     } else {
@@ -277,11 +278,13 @@ func syncVisibility() {
     if NSMenu.menuBarVisible() {
         if !panel.isVisible { panel.orderFrontRegardless() }
     } else if panel.isVisible { panel.orderOut(nil) }
+    updateClickTarget()
 }
 
 func stop() {
     guard enabled || panel != nil else { return }
     enabled = false
+    manuallyCollapsed = false
     revealed = false; animationRunning = false; enteredAt = nil
     animationTimer?.invalidate(); animationTimer = nil
     if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor); self.mouseMonitor = nil }
@@ -290,6 +293,7 @@ func stop() {
     panel?.orderOut(nil)
     panel?.close()
     panel = nil
+    clickPanel?.close(); clickPanel = nil
     emit("cleanup", ["remainingPanels": 0])
     currentPID = 0
 }
@@ -323,6 +327,7 @@ func start() {
                    "fixedFrame": frameJSON(coverFrame), "level": coverLevel.rawValue])
     updateTitle()
     cover.orderFrontRegardless()
+    refreshPreferences()
     timer = Timer(timeInterval: 1.0 / 20, repeats: true) { [weak self] _ in self?.tick() }
     RunLoop.main.add(timer!, forMode: .common)
     activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -332,7 +337,74 @@ func start() {
 
 }
 
+final class IndicatorButton: NSButton {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+func refreshPreferences() {
+    panel?.contentView?.needsDisplay = true
+    enteredAt = nil
+    manuallyCollapsed = false
+    updateClickTarget()
+}
+
+static func indicatorFrame(cover: NSRect, titleWidth: CGFloat, menuEnd: CGFloat, expanded: Bool) -> NSRect {
+    let remaining = cover.width - menuEnd
+    let fitsAfterMenus = remaining >= 14
+    let width: CGFloat = expanded && fitsAfterMenus ? min(18, remaining) : 18
+    // Opening moves the control beyond Help rather than leaving it over File.
+    // For menus filling the space up to the notch, use the empty padding before
+    // the Apple glyph; never clamp the control onto a native menu heading.
+    let x = expanded ? (fitsAfterMenus ? cover.minX + menuEnd : cover.minX - 43)
+        : cover.minX + titleWidth + 17
+    return NSRect(x: x, y: cover.minY, width: width, height: cover.height)
+}
+
+func updateClickTarget() {
+    guard enabled, panel?.isVisible == true,
+          let view = panel?.contentView as? CoverView else { clickPanel?.orderOut(nil); return }
+    let width = min((view.applicationName as NSString).size(withAttributes: [.font: view.font]).width, coverFrame.width - 45)
+    let frame = Self.indicatorFrame(cover: coverFrame, titleWidth: width, menuEnd: view.menuEnd, expanded: revealed)
+    if clickPanel == nil {
+        let hit = CoverPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        hit.level = coverLevel
+        hit.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        // macOS hit-tests transparent panels through to the native File menu.
+        // The button occupies the same black pixels as the cover, so an opaque
+        // patch captures the click without changing the visible backdrop.
+        hit.isReleasedWhenClosed = false; hit.isOpaque = true; hit.backgroundColor = .black
+        hit.hasShadow = false; hit.hidesOnDeactivate = false
+        let content = NSView(frame: NSRect(origin: .zero, size: frame.size))
+        let button = IndicatorButton(frame: content.bounds)
+        button.title = ""; button.target = self; button.action = #selector(indicatorClicked)
+        button.autoresizingMask = [.width, .height]
+        button.isBordered = false; button.focusRingType = .none
+        button.imagePosition = .imageOnly; button.imageScaling = .scaleProportionallyDown
+        button.contentTintColor = .white
+        button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        content.addSubview(button)
+        hit.contentView = content
+        clickPanel = hit
+    }
+    if let button = clickPanel?.contentView?.subviews.first as? NSButton {
+        button.image = IndicatorIcons.image(for: .left, expanded: revealed)
+        button.setAccessibilityLabel(revealed ? "Hide application menus" : "Reveal application menus")
+        button.toolTip = revealed ? "Hide application menus" : "Reveal application menus"
+    }
+    if clickPanel?.frame != frame { clickPanel?.setFrame(frame, display: true) }
+    if clickPanel?.isVisible != true { clickPanel?.orderFrontRegardless() }
+}
+
+@objc func indicatorClicked() {
+    if NSApp.currentEvent?.type == .rightMouseUp { onSettings?(); return }
+    manualUntil = .distantPast
+    lastInside = Date()
+    manuallyCollapsed = revealed
+    setReveal(!revealed, "indicator-click")
+}
+
 func revealForShortcut() {
+    manuallyCollapsed = false
     manualUntil = Date().addingTimeInterval(5)
     setReveal(true, "shortcut")
 }

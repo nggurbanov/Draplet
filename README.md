@@ -1,14 +1,25 @@
 # Draplet
 
 Your menu bar, on demand. A small, free, open-source macOS utility for both sides
-of the menu bar. MIT licensed. This is the first personal daily-use build, 0.1.0.
+of the menu bar. MIT licensed. Personal daily-use build, 0.2.0.
 
 ## Use
 
-- Left: keeps the Apple logo and application name visible; hover to uncover the
+- Left: keeps the Apple logo and application name visible; hover or click to uncover the
   native application menus with a 180 ms feathered wipe. The title stays in place.
 - Right: click the arrow to hide or reveal status icons. Right-click for Settings,
   Pause/Resume, Reveal Both Sides, and Quit.
+- Both sides default to Hover. Settings → Reveal offers a shared Hover/Click
+  selector or independent choices. Clicking also works in Hover mode. The left
+  arrow stays visible and toggles both ways; while open it sits after the last
+  menu (or before the Apple glyph if the menus fill the space up to the notch),
+  leaving File and the other native menus clickable.
+- Settings → Icons offers matching Chevron, Arrow, Triangle, Hidden Bar, Dots,
+  or custom artwork, with optional separate choices. Directional presets mirror
+  toward/away from the center; custom artwork keeps its orientation. Hidden Bar
+  uses its original arrows as homage. Custom PNG/JPEG/TIFF/PDF files (up to 8 MB)
+  are copied as a compact transparent template into preferences, so removing the
+  source file doesn't break the icon. Custom artwork can be replaced or removed.
 - Hold ⌘ and drag the arrow between icons to choose the boundary. Icons to its
   left hide; icons to its right remain visible. macOS remembers the arrangement.
 - Optional hover reveal, auto-hide delay, and an always-hidden section are in

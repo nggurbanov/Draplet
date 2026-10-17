@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                       replaceHiddenBar: { [weak self] in self?.right.replaceHiddenBar() },
                                       revealBoth: { [weak self] in self?.revealBoth() }, pause: { [weak self] in self?.togglePause() })
         right.onSettings = { [weak self] in self?.settings.show() }
+        left.onSettings = { [weak self] in self?.settings.show() }
         right.onPause = { [weak self] in self?.togglePause() }
         right.onRevealAll = { [weak self] in self?.revealBoth() }
         right.isSettingsVisible = { [weak self] in self?.settings.window?.isVisible ?? false }
@@ -54,6 +55,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         prefs.permissionGranted = AXIsProcessTrusted()
         if prefs.leftEnabled && !prefs.paused && prefs.permissionGranted { left.start() }
         else { left.stop() }
+        left.refreshPreferences()
         right.configure()
         registerShortcut()
     }
@@ -141,8 +143,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     case "status":
                         let status: [String: Any] = ["authorized": AXIsProcessTrusted(), "leftEnabled": self.left.enabled,
                             "right": self.prefs.rightStatus, "native": HBNativeVisibilityIsAvailable(),
-                            "leftVisible": self.left.panel?.isVisible ?? false, "progress": (self.left.panel?.contentView as? LeftCurtain.CoverView)?.progress ?? 0,
+                            "leftVisible": self.left.panel?.isVisible ?? false, "leftRevealed": self.left.revealed, "progress": (self.left.panel?.contentView as? LeftCurtain.CoverView)?.progress ?? 0,
                             "frame": self.left.frameJSON(self.left.coverFrame), "level": self.left.coverLevel.rawValue,
+                            "leftTrigger": self.prefs.trigger(for: .left).rawValue, "rightTrigger": self.prefs.trigger(for: .right).rawValue,
+                            "leftIcon": self.prefs.icon(for: .left).rawValue, "rightIcon": self.prefs.icon(for: .right).rawValue,
+                            "hitWindow": self.left.clickPanel?.windowNumber ?? 0,
+                            "hitVisible": self.left.clickPanel?.isVisible ?? false,
+                            "leftArrowFrame": self.left.frameJSON(self.left.clickPanel?.frame ?? .zero),
                             "arrowFrame": self.left.frameJSON(self.right.toggleItem.button?.window?.frame ?? .zero)]
                         let data = try! JSONSerialization.data(withJSONObject: status, options: .sortedKeys)
                         print(String(data: data, encoding: .utf8)!, terminator: "\n"); fflush(stdout)
@@ -150,6 +157,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     case "collapse": self.right.collapse()
                     case "reveal": self.revealBoth()
                     case "settings": self.settings.show()
+                    case "left-toggle": self.left.indicatorClicked()
+                    case "both-click": self.prefs.sharedTrigger = .click; self.prefs.sameTrigger = true
+                    case "both-hover": self.prefs.sharedTrigger = .hover; self.prefs.sameTrigger = true
+                    case "default-icons":
+                        self.prefs.removeCustomIcon(side: nil); self.prefs.removeCustomIcon(side: .left); self.prefs.removeCustomIcon(side: .right)
+                        self.prefs.sharedIcon = .chevron; self.prefs.leftIcon = .chevron; self.prefs.rightIcon = .chevron; self.prefs.sameIcons = true
                     case "pause": self.togglePause()
                     case "quit": NSApp.terminate(nil)
                     default: break
