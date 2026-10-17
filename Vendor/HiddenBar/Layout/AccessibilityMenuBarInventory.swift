@@ -57,10 +57,12 @@ final class AccessibilityMenuBarInventory: MenuBarInventoryProviding {
             var barValue: CFTypeRef?
             guard AXUIElementCopyAttributeValue(element, "AXExtrasMenuBar" as CFString, &barValue) == .success,
                   let bar = barValue else { continue }
+            AXUIElementSetMessagingTimeout(bar as! AXUIElement, messagingTimeout)
             var childrenValue: CFTypeRef?
             guard AXUIElementCopyAttributeValue(bar as! AXUIElement, kAXChildrenAttribute as CFString, &childrenValue) == .success,
                   let children = childrenValue as? [AXUIElement] else { continue }
             for child in children {
+                AXUIElementSetMessagingTimeout(child, messagingTimeout)
                 guard let frame = frame(of: child) else { continue }
                 items.append(MenuBarInventoryItem(bundleIdentifier: app.bundleIdentifier, frame: frame))
             }

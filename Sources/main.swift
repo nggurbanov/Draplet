@@ -1,0 +1,167 @@
+import AppKit
+import ApplicationServices
+import Carbon
+
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    let prefs = Preferences.shared
+    let left = LeftCurtain()
+    var right: RightCurtain!
+    var settings: SettingsController!
+    var pulse: Timer?
+    var observers: [NSObjectProtocol] = []
+    var hotkey: EventHotKeyRef?
+    var eventHandler: EventHandlerRef?
+    var wasAuthorized = false
+    var hiddenBarWasRunning = false
+    var terminating = false
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let siblings = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "com.tyrell.Draplet")
+        if siblings.count > 1 {
+            siblings.first { $0.processIdentifier != getpid() }?.activate(options: [])
+            exit(0)
+        }
+        makeMenus()
+        right = RightCurtain()
+        settings = SettingsController(prefs: prefs, requestPermission: { [weak self] in self?.requestPermission() },
+                                      replaceHiddenBar: { [weak self] in self?.right.replaceHiddenBar() },
+                                      revealBoth: { [weak self] in self?.revealBoth() }, pause: { [weak self] in self?.togglePause() })
+        right.onSettings = { [weak self] in self?.settings.show() }
+        right.onPause = { [weak self] in self?.togglePause() }
+        right.onRevealAll = { [weak self] in self?.revealBoth() }
+        right.isSettingsVisible = { [weak self] in self?.settings.window?.isVisible ?? false }
+        observers.append(NotificationCenter.default.addObserver(forName: .drapletPreferencesChanged, object: nil, queue: .main) { [weak self] _ in self?.applyPreferences() })
+        observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in self?.refreshDisplays() })
+        observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in self?.refreshDisplays() })
+        observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in self?.left.syncVisibility() })
+        wasAuthorized = AXIsProcessTrusted()
+        hiddenBarWasRunning = right.competingApp != nil
+        applyPreferences()
+        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in self?.tick() }
+        pulse = timer
+        RunLoop.main.add(timer, forMode: .common)
+        let firstRun = !UserDefaults.standard.bool(forKey: "hasLaunched")
+        UserDefaults.standard.set(true, forKey: "hasLaunched")
+        if firstRun || !wasAuthorized || CommandLine.arguments.contains("--settings") { settings.show() }
+        if CommandLine.arguments.contains("--test-controls") { testControls() }
+        if let index = CommandLine.arguments.firstIndex(of: "--quit-after"), CommandLine.arguments.count > index + 1,
+           let seconds = Double(CommandLine.arguments[index + 1]) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { NSApp.terminate(nil) }
+        }
+        NSLog("Draplet ready; accessibility=%d; nativeVisibility=%d", wasAuthorized, HBNativeVisibilityIsAvailable())
+    }
+    func applyPreferences() {
+        prefs.permissionGranted = AXIsProcessTrusted()
+        if prefs.leftEnabled && !prefs.paused && prefs.permissionGranted { left.start() }
+        else { left.stop() }
+        right.configure()
+        registerShortcut()
+    }
+    func refreshDisplays() {
+        left.stop()
+        applyPreferences()
+        right.engine.invalidateLayout()
+    }
+    func tick() {
+        let authorized = AXIsProcessTrusted()
+        let competing = right.competingApp != nil
+        if wasAuthorized != authorized || hiddenBarWasRunning != competing {
+            wasAuthorized = authorized; hiddenBarWasRunning = competing
+            applyPreferences()
+        }
+        right.tick()
+    }
+    @objc func togglePause() { prefs.paused.toggle(); applyPreferences() }
+    @objc func revealBoth() { left.revealForShortcut(); right.expand(all: true) }
+    @objc func showSettings() { settings.show() }
+    func requestPermission() {
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") { NSWorkspace.shared.open(url) }
+    }
+    private func makeMenus() {
+        let bar = NSMenu()
+        let item = bar.addItem(withTitle: "Draplet", action: nil, keyEquivalent: "")
+        let menu = NSMenu(title: "Draplet")
+        let settings = menu.addItem(withTitle: "Draplet Settings…", action: #selector(showSettings), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(.separator())
+        menu.addItem(withTitle: "Quit Draplet", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        item.submenu = menu
+        let edit = bar.addItem(withTitle: "Edit", action: nil, keyEquivalent: "")
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        edit.submenu = editMenu
+        NSApp.mainMenu = bar
+    }
+    func registerShortcut() {
+        if let hotkey { UnregisterEventHotKey(hotkey); self.hotkey = nil }
+        guard prefs.shortcut < 3 else { return }
+        if eventHandler == nil {
+            var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+            let context = Unmanaged.passUnretained(self).toOpaque()
+            InstallEventHandler(GetApplicationEventTarget(), { _, _, context in
+                guard let context else { return OSStatus(eventNotHandledErr) }
+                Unmanaged<AppDelegate>.fromOpaque(context).takeUnretainedValue().revealBoth()
+                return noErr
+            }, 1, &spec, context, &eventHandler)
+        }
+        let key = [UInt32(kVK_Space), UInt32(kVK_ANSI_D), UInt32(kVK_ANSI_B)][prefs.shortcut]
+        let result = RegisterEventHotKey(key, UInt32(controlKey | optionKey), EventHotKeyID(signature: 0x44524150, id: 1), GetApplicationEventTarget(), 0, &hotkey)
+        if result != noErr { prefs.error = "The reveal shortcut is already in use. Choose another in General." }
+    }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { settings.show(); return true }
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        cleanup()
+        // A utility owns no documents. Exit after releasing all native assertions;
+        // this also avoids AppKit's termination negotiation hanging in menu tracking.
+        DispatchQueue.main.async { exit(0) }
+        return .terminateNow
+    }
+    func applicationWillTerminate(_ notification: Notification) { cleanup() }
+    func cleanup() {
+        guard !terminating else { return }; terminating = true
+        pulse?.invalidate(); left.stop(); right?.stop()
+        if let hotkey { UnregisterEventHotKey(hotkey) }
+        if let eventHandler { RemoveEventHandler(eventHandler) }
+        for observer in observers {
+            NotificationCenter.default.removeObserver(observer)
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+        NSLog("Draplet cleanup complete")
+    }
+    private func testControls() {
+        Thread.detachNewThread { [weak self] in
+            while let line = readLine() {
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    switch line {
+                    case "status":
+                        let status: [String: Any] = ["authorized": AXIsProcessTrusted(), "leftEnabled": self.left.enabled,
+                            "right": self.prefs.rightStatus, "native": HBNativeVisibilityIsAvailable(),
+                            "leftVisible": self.left.panel?.isVisible ?? false, "progress": (self.left.panel?.contentView as? LeftCurtain.CoverView)?.progress ?? 0,
+                            "frame": self.left.frameJSON(self.left.coverFrame), "level": self.left.coverLevel.rawValue,
+                            "arrowFrame": self.left.frameJSON(self.right.toggleItem.button?.window?.frame ?? .zero)]
+                        let data = try! JSONSerialization.data(withJSONObject: status, options: .sortedKeys)
+                        print(String(data: data, encoding: .utf8)!, terminator: "\n"); fflush(stdout)
+                    case "expand": self.right.expand()
+                    case "collapse": self.right.collapse()
+                    case "reveal": self.revealBoth()
+                    case "settings": self.settings.show()
+                    case "pause": self.togglePause()
+                    case "quit": NSApp.terminate(nil)
+                    default: break
+                    }
+                }
+            }
+        }
+    }
+}
+
+let app = NSApplication.shared
+app.setActivationPolicy(.accessory)
+let delegate = AppDelegate()
+app.delegate = delegate
+app.run()
