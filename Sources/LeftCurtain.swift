@@ -405,8 +405,8 @@ func updateClickTarget() {
         hit.level = coverLevel
         hit.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         // macOS hit-tests transparent panels through to the native File menu.
-        // The button occupies the same black pixels as the cover, so an opaque
-        // patch captures the click without changing the visible backdrop.
+        // Paint the exact background crop into the opaque click target so it
+        // intercepts the click without changing the visible backdrop.
         hit.isReleasedWhenClosed = false; hit.isOpaque = true; hit.backgroundColor = .windowBackgroundColor
         hit.hasShadow = false; hit.hidesOnDeactivate = false
         let content = IndicatorBackdrop(frame: NSRect(origin: .zero, size: frame.size))
@@ -426,7 +426,13 @@ func updateClickTarget() {
         button.setAccessibilityLabel(revealed ? "Hide application menus" : "Reveal application menus")
         button.toolTip = revealed ? "Hide application menus" : "Reveal application menus"
     }
-    if clickPanel?.frame != frame { clickPanel?.setFrame(frame, display: true) }
+    if clickPanel?.frame != frame {
+        clickPanel?.setFrame(frame, display: false)
+        // Moving an NSWindow reuses its backing pixels. The background is
+        // screen-aligned, so its old crop becomes wrong even on a still wallpaper.
+        clickPanel?.contentView?.needsDisplay = true
+        clickPanel?.displayIfNeeded()
+    }
     if clickPanel?.isVisible != true { clickPanel?.orderFrontRegardless() }
 }
 
