@@ -189,7 +189,8 @@ Fullscreen regression checks replay the real Minecraft window geometry and the
 measured native opacity fade (about 1.2 seconds on the development Mac). Repeating
 an unchanged presentation state must not raise a cover above the game. A live
 metadata trace verified that the covers remain absent during the game and return
-on the desktop. The final physical switching check remains pending user feedback.
+on the desktop. After the diagnostic recording was stopped, the user confirmed
+normal brightness and a clean bar after switching back from Minecraft.
 
 Read-only window metadata can be collected without recording video:
 

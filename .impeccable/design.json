@@ -218,7 +218,8 @@
           "Actual game metadata trace has no Draplet covers during the fullscreen intervals",
           "Still capture after stopping the diagnostic recording shows the native black menu-bar background"
         ],
-        "userFinalFullscreenFeedbackPending": true,
+        "userFinalFullscreenFeedbackPending": false,
+        "userFinalFullscreenResult": "User confirmed normal brightness and a clean bar after returning from Minecraft once diagnostic recording was stopped",
         "diagnosticLimitation": "Region video recording was aborted because its UI dimmed the rest of the desktop; no video validation claimed"
       }
     }
