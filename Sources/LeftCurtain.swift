@@ -316,7 +316,9 @@ func start() {
                             backing: .buffered, defer: false)
     cover.isReleasedWhenClosed = false
     cover.level = coverLevel
-    cover.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+    // Floating covers must disappear with the real menu bar in Mission Control.
+    // Stationary windows instead remain pasted over the desktop and Spaces strip.
+    cover.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
     cover.backgroundColor = .clear
     cover.isOpaque = false
     cover.hasShadow = false
@@ -403,7 +405,7 @@ func updateClickTarget() {
     if clickPanel == nil {
         let hit = CoverPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         hit.level = coverLevel
-        hit.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        hit.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
         // macOS hit-tests transparent panels through to the native File menu.
         // Paint the exact background crop into the opaque click target so it
         // intercepts the click without changing the visible backdrop.

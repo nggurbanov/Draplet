@@ -1,14 +1,15 @@
 # Draplet
 
 Your menu bar, on demand. A small, free, open-source macOS utility for both sides
-of the menu bar. MIT licensed. Personal daily-use build, 0.4.0.
+of the menu bar. MIT licensed. Personal daily-use build, 0.4.1.
 
 ## Use
 
 - Left: keeps the Apple logo and application name visible; hover or click to uncover the
   native application menus. The title stays in place.
 - Right: click the arrow to hide or reveal status icons. Right-click for Settings,
-  Pause/Resume, Reveal Both Sides, and Quit.
+  Pause Hiding / Resume Hiding, Reveal Both Sides, and Quit. Pausing keeps both
+  sides visible until hiding is resumed.
 - Both sides default to Hover. Settings → General offers a shared Hover/Click
   selector or independent choices. Clicking also works in Hover mode. The left
   arrow stays visible and toggles both ways; while open it sits after the last
@@ -27,6 +28,9 @@ of the menu bar. MIT licensed. Personal daily-use build, 0.4.0.
   ⌥-click the arrow to reveal every section for arranging it.
 - ⌃⌥Space reveals both sides. Alternatives ⌃⌥D, ⌃⌥B, or Disabled are in Settings.
 - Launch at login is opt-in. Reopen `/Applications/Draplet.app` for Settings.
+- Draplet appears in the Dock while Settings is open, including when minimized.
+  Closing Settings returns it to menu-bar-only operation.
+- Overlay windows use AppKit's transient behavior to hide during Mission Control.
 - Quit releases the icon-hiding assertion and removes every cover/status item.
 
 Accessibility is required for reading menu geometry. Grant it through Settings;
@@ -100,7 +104,10 @@ original interior RGB and derives the actual tile contour for its alpha mask.
 The resizable native Settings window has General, Appearance, Left, Right and
 Shortcuts tabs. Shared visual choices live in Appearance; General links reveal
 behavior, and Left/Right expose independent actions when unlinked. Changes apply
-immediately. Pause/Resume and Reveal Both Sides stay available across tabs.
+immediately. Pause Hiding / Resume Hiding and Reveal Both Sides stay available
+across tabs. A paused notice explains why both sides remain visible. Icon menus
+show each preset's artwork, including imported custom icons. Toolbar tabs have
+inset selection backgrounds and full rectangular click targets.
 Appearance follows macOS automatically, with warm light/dark surfaces and contrast
 checked against real native renders. The small preview is explicitly illustrative;
 Preview Both Sides exercises the real menu bar.
@@ -110,7 +117,7 @@ bash scripts/build-dmg.sh
 ```
 
 The packaging script creates `.build/packaging-venv` and installs pinned dmgbuild
-1.6.7 there if needed. It writes `dist/Draplet-0.4.0.dmg`, verifies the image, mounts
+1.6.7 there if needed. It writes `dist/Draplet-0.4.1.dmg`, verifies the image, mounts
 it temporarily and verifies the packaged app signature, executable and Applications
 shortcut. The approved background is `Resources/Installer/background.tiff`, at 2x
 resolution. Finder opens an 800×500 icon view with actual draggable file targets.

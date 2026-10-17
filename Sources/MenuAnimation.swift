@@ -94,7 +94,7 @@ final class RightMenuCover: TransitionCover {
             // AppKit's implicit order-in/out fade can overlap our mask animation
             // when this panel is reused by a quick second click.
             window.animationBehavior = .none
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
             window.contentView = View(frame: NSRect(origin: .zero, size: frame.size))
             panel = window
         }

@@ -204,13 +204,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             "hitVisible": self.left.clickPanel?.isVisible ?? false,
                             "leftArrowFrame": self.left.frameJSON(self.left.clickPanel?.frame ?? .zero),
                             "arrowFrame": self.left.frameJSON(self.right.toggleItem.button?.window?.frame ?? .zero)]
-                        let data = try! JSONSerialization.data(withJSONObject: status, options: .sortedKeys)
+                        var output = status
+                        output["dockVisible"] = NSApp.activationPolicy() == .regular
+                        output["settingsVisible"] = self.settings.window?.isVisible ?? false
+                        let data = try! JSONSerialization.data(withJSONObject: output, options: .sortedKeys)
                         print(String(data: data, encoding: .utf8)!, terminator: "\n"); fflush(stdout)
                     case "right-click": self.right.toggleItem.button?.performClick(nil)
                     case "expand": self.right.expand()
                     case "collapse": self.right.collapse()
                     case "reveal": self.revealBoth()
                     case "settings": self.settings.show()
+                    case "settings-close": self.settings.window?.close()
                     case "appearance-light": self.settings.window?.appearance = NSAppearance(named: .aqua)
                     case "appearance-dark": self.settings.window?.appearance = NSAppearance(named: .darkAqua)
                     case "appearance-system": self.settings.window?.appearance = nil

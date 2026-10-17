@@ -89,7 +89,7 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
             }
             add("Draplet Settings…", #selector(settings))
             add("Reveal Both Sides", #selector(revealBoth))
-            add(prefs.paused ? "Resume Draplet" : "Pause Draplet", #selector(pause))
+            add(prefs.paused ? "Resume Hiding" : "Pause Hiding", #selector(pause))
             if competingApp != nil { add("Quit Hidden Bar and Use Draplet", #selector(replaceHiddenBar)) }
             menu.addItem(.separator())
             add("Quit Draplet", #selector(quit))
@@ -136,7 +136,9 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
             completion?(.unavailable)
             return
         }
-        if prefs.fullWidth { NSApp.setActivationPolicy(.accessory); NSApp.deactivate() }
+        // Settings alone owns the Dock policy. Full-width mode only borrows
+        // focus for Draplet's short menu and must not hide an open Settings app.
+        if prefs.fullWidth && !isSettingsVisible() { NSApp.deactivate() }
         revealAllMode = false
         separatorsHidden = true
         engine.updateAlwaysHiddenSection(enabled: prefs.alwaysHidden, separatorHidden: true)
@@ -153,7 +155,7 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
         collapseTimer?.invalidate()
         if all { revealAllMode = true; separatorsHidden = false }
         engine.updateAlwaysHiddenSection(enabled: canManage && prefs.alwaysHidden, separatorHidden: !revealAllMode)
-        if prefs.fullWidth && canManage { NSApp.setActivationPolicy(.regular); NSApp.activate(ignoringOtherApps: true) }
+        if prefs.fullWidth && canManage { NSApp.activate(ignoringOtherApps: true) }
         transition.expand(style: canManage ? animationStyle : .hiddenBar, pace: prefs.animationPace,
                           frame: animationFrame, onStart: onStart) { [weak self] in self?.updatePresentation() }
         updatePresentation()

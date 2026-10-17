@@ -90,12 +90,24 @@ struct SettingsView: View {
     let requestPermission: () -> Void
     let replaceHiddenBar: () -> Void
     let revealBoth: () -> Void
+    let pause: () -> Void
     let previewAnimations: () -> Void
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     Text(navigation.page.rawValue).font(.system(size: 25, weight: .bold)).padding(.bottom, 1)
+                    if prefs.paused {
+                        HStack(spacing: 12) {
+                            Image(systemName: "pause.circle").font(.title2).foregroundStyle(SettingsPalette.accent)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Hiding is paused").fontWeight(.semibold)
+                                Text("Both sides stay visible until you resume hiding.").font(.system(size: 12)).foregroundStyle(SettingsPalette.secondary)
+                            }
+                            Spacer()
+                            Button("Resume Hiding", action: pause)
+                        }.padding(16).background(SettingsPalette.surface, in: RoundedRectangle(cornerRadius: 9))
+                    }
                     if navigation.page == .appearance || navigation.page == .left || navigation.page == .right {
                         MenuBarPreview(prefs: prefs, expanded: $navigation.previewExpanded)
                     }
@@ -324,15 +336,61 @@ struct SettingsView: View {
         let selection = side == nil ? $prefs.sharedIcon : (side == .left ? $prefs.leftIcon : $prefs.rightIcon)
         let data = side == nil ? prefs.sharedCustomIcon : prefs.customIcon(for: side!)
         return SettingsRow(title) {
-            Picker(title, selection: selection) {
-                ForEach(IndicatorStyle.allCases.filter { $0 != .custom || data != nil }, id: \.self) { Text($0.title).tag($0) }
-            }.labelsHidden().frame(width: 190)
+            IconPicker(title: title, selection: selection, data: data, side: side ?? .left).frame(width: 190)
             HStack(spacing: 18) {
                 Image(nsImage: IndicatorIcons.image(style: selection.wrappedValue, data: data, side: .left))
                 Image(nsImage: IndicatorIcons.image(style: selection.wrappedValue, data: data, side: .right))
             }.frame(width: 70, height: 28).background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 5)).accessibilityLabel("Selected icon preview")
             Button("Import Custom…") { IndicatorIcons.importIcon(prefs: prefs, side: side) }
             if data != nil { Button { prefs.removeCustomIcon(side: side) } label: { Image(systemName: "trash") }.help("Remove custom icon").accessibilityLabel("Remove custom icon") }
+        }
+    }
+}
+
+// NSMenuItem.image keeps the artwork visible both in the open menu and in the
+// selected item. SwiftUI's macOS Picker drops images from some custom labels.
+private struct IconPicker: NSViewRepresentable {
+    let title: String
+    @Binding var selection: IndicatorStyle
+    let data: Data?
+    let side: BarSide
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeNSView(context: Context) -> NSPopUpButton {
+        let button = NSPopUpButton(frame: .zero, pullsDown: false)
+        button.controlSize = .regular
+        button.target = context.coordinator; button.action = #selector(Coordinator.select(_:))
+        button.setAccessibilityLabel(title)
+        return button
+    }
+    func updateNSView(_ button: NSPopUpButton, context: Context) {
+        let coordinator = context.coordinator
+        coordinator.selection = $selection
+        let styles = IndicatorStyle.allCases.filter { $0 != .custom || data != nil }
+        // Background and right-side status changes also refresh this view.
+        // Leave a menu being tracked intact when its artwork has not changed.
+        if button.numberOfItems != styles.count || coordinator.data != data || coordinator.side != side {
+            button.removeAllItems()
+            for style in styles {
+                let item = NSMenuItem(title: style.title, action: nil, keyEquivalent: "")
+                item.representedObject = style.rawValue
+                item.image = IndicatorIcons.image(style: style, data: data, side: side)
+                button.menu?.addItem(item)
+            }
+            coordinator.data = data; coordinator.side = side
+        }
+        if let item = button.itemArray.first(where: { $0.representedObject as? String == selection.rawValue }),
+           button.selectedItem !== item {
+            button.select(item)
+        }
+    }
+    final class Coordinator: NSObject {
+        var selection: Binding<IndicatorStyle>?
+        var data: Data?
+        var side: BarSide?
+        @objc func select(_ sender: NSPopUpButton) {
+            guard let raw = sender.selectedItem?.representedObject as? String,
+                  let style = IndicatorStyle(rawValue: raw) else { return }
+            selection?.wrappedValue = style
         }
     }
 }
@@ -388,11 +446,15 @@ private struct SettingsToolbarButton: View {
             VStack(spacing: 5) {
                 Image(systemName: page.symbol).font(.system(size: 20, weight: .regular)).frame(height: 22)
                 Text(page.rawValue).font(.system(size: 12))
-            }.frame(width: page == .appearance ? 92 : 68, height: 54)
+            }.frame(width: page == .appearance ? 88 : 64, height: 42)
                 .foregroundStyle(navigation.page == page ? SettingsPalette.accent : Color.primary)
                 .background(navigation.page == page ? SettingsPalette.accent.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 7))
+                .contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityLabel(page.rawValue)
             .accessibilityAddTraits(navigation.page == page ? .isSelected : [])
+            // The unified toolbar caps custom views at 54 points. Keep the
+            // padding inside that height, otherwise AppKit clips it away.
+            .padding(.vertical, 6)
     }
 }
 
@@ -400,12 +462,13 @@ private struct SettingsPauseButton: View {
     @ObservedObject var prefs: Preferences
     let action: () -> Void
     var body: some View {
-        Button(action: action) { Label(prefs.paused ? "Resume" : "Pause", systemImage: prefs.paused ? "play.fill" : "pause.fill") }
+        Button(action: action) { Label(prefs.paused ? "Resume Hiding" : "Pause Hiding", systemImage: prefs.paused ? "play.fill" : "pause.fill") }
             .labelStyle(.titleAndIcon).controlSize(.regular).tint(SettingsPalette.accent)
+            .help(prefs.paused ? "Resume hiding menus and icons with your usual settings." : "Reveal both sides and keep them visible until you resume hiding.")
     }
 }
 
-final class SettingsController: NSWindowController, NSToolbarDelegate {
+final class SettingsController: NSWindowController, NSToolbarDelegate, NSWindowDelegate {
     let navigation = SettingsNavigation()
     private let prefs: Preferences
     private let pause: () -> Void
@@ -416,9 +479,10 @@ final class SettingsController: NSWindowController, NSToolbarDelegate {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 940, height: 710), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         super.init(window: window)
         let view = SettingsView(prefs: prefs, navigation: navigation, requestPermission: requestPermission,
-                                replaceHiddenBar: replaceHiddenBar, revealBoth: revealBoth, previewAnimations: previewAnimations)
+                                replaceHiddenBar: replaceHiddenBar, revealBoth: revealBoth, pause: pause, previewAnimations: previewAnimations)
         window.contentViewController = NSHostingController(rootView: view)
         window.title = "Draplet Settings"
+        window.delegate = self
         window.titleVisibility = .hidden; window.titlebarAppearsTransparent = true
         window.backgroundColor = SettingsPalette.background
         window.toolbarStyle = .unified
@@ -440,11 +504,11 @@ final class SettingsController: NSWindowController, NSToolbarDelegate {
         if identifier.rawValue == "brand" {
             let brand = HStack(spacing: 9) {
                 Image(nsImage: NSImage(named: NSImage.applicationIconName) ?? NSImage()).resizable().frame(width: 32, height: 32)
-                Text("Draplet Settings").font(.system(size: 17, weight: .semibold))
-            }.frame(width: 196, height: 54)
+                Text("Draplet Settings").font(.system(size: 16, weight: .semibold))
+            }.frame(width: 180, height: 54)
             item.view = NSHostingView(rootView: brand)
         } else if identifier.rawValue == "pause" {
-            item.view = NSHostingView(rootView: SettingsPauseButton(prefs: prefs, action: pause).frame(width: 100, height: 54))
+            item.view = NSHostingView(rootView: SettingsPauseButton(prefs: prefs, action: pause).frame(width: 138, height: 54))
         } else if let page = SettingsPage(rawValue: identifier.rawValue) {
             item.view = NSHostingView(rootView: SettingsToolbarButton(navigation: navigation, page: page))
         } else { return nil }
@@ -452,5 +516,9 @@ final class SettingsController: NSWindowController, NSToolbarDelegate {
         item.label = ""; item.paletteLabel = identifier.rawValue
         return item
     }
-    func show() { showWindow(nil); window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
+    func show() {
+        NSApp.setActivationPolicy(.regular)
+        showWindow(nil); window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+    }
+    func windowWillClose(_ notification: Notification) { NSApp.setActivationPolicy(.accessory) }
 }

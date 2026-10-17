@@ -89,7 +89,8 @@
       ],
       "resizable": true,
       "frameAutosaveName": "Draplet.Settings",
-      "scrollStrategy": "Vertical ScrollView for page content; footer remains outside scrolling content"
+      "scrollStrategy": "Vertical ScrollView for page content; footer remains outside scrolling content",
+      "dockPolicy": "Regular while Settings is open, including minimized; accessory on close"
     },
     "navigation": {
       "tabs": [
@@ -101,11 +102,14 @@
       ],
       "initialTab": "Appearance",
       "tabWidthsPt": {
-        "Appearance": 92,
-        "other": 68
+        "Appearance": 88,
+        "other": 64
       },
-      "pauseResume": "Toolbar",
-      "revealBothSides": "Persistent footer"
+      "pauseResume": "Pause Hiding / Resume Hiding in toolbar; visible explanation while paused",
+      "revealBothSides": "Persistent footer",
+      "tabControlHeightPt": 42,
+      "tabHostHeightPt": 54,
+      "tabVerticalPaddingPt": 6
     },
     "nativeComponents": [
       {
@@ -117,7 +121,7 @@
         "name": "Selected toolbar tab",
         "kind": "nav",
         "refersTo": "toolbar-tab",
-        "implementation": "Plain SwiftUI Button with selected accessibility trait; adaptive accent text and 12% accent rounded background"
+        "implementation": "Plain SwiftUI Button with full rectangular hit area, selected accessibility trait, adaptive accent text, 12% accent rounded background and 6pt vertical inset"
       },
       {
         "name": "Settings group",
@@ -174,7 +178,21 @@
         "Pause/Resume"
       ],
       "htmlCssDetector": "Not run: native SwiftUI/AppKit",
-      "scope": "Reviewed local Settings, icon and installer; no public release, paid signing or notarization claim"
+      "scope": "Reviewed local Settings, icon and installer; no public release, paid signing or notarization claim",
+      "refinement041": {
+        "passingChecks": 75,
+        "verified": [
+          "Settings Dock lifecycle including minimized close and reopen",
+          "full-width reveal without Dock icon",
+          "top inset in both appearances",
+          "blank-corner tab click",
+          "icon artwork and selection",
+          "paused explanation and resume",
+          "all three overlays absent in Mission Control and restored afterward",
+          "mounted DMG app signature, executable and Applications shortcut"
+        ],
+        "screenshot": ".impeccable/review/mission-control-041.png"
+      }
     }
   },
   "components": [],

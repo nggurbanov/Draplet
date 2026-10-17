@@ -357,4 +357,20 @@ visualCover.finish(); visualEngine.finish(.collapsed); runScheduled(RightMenuTra
 transitions.cancelAndExpand()
 check(!visualCover.isVisible && visualEngine.state == .expanded,
       "Pausing or reconfiguring still removes a retained closed curtain and releases native hiding")
+// Exercise the real Settings window, including delegate delivery on close.
+// Keep it offscreen so the test does not put a second Settings window on the desktop.
+let settings = SettingsController(prefs: prefs, requestPermission: {}, replaceHiddenBar: {},
+                                  revealBoth: {}, pause: {}, previewAnimations: {})
+settings.window?.setFrameOrigin(NSPoint(x: -4000, y: 0))
+check(app.activationPolicy() == .accessory, "Constructing Settings alone does not add a Dock icon")
+settings.show()
+check(app.activationPolicy() == .regular, "Opening Settings adds the app to the Dock")
+settings.window?.miniaturize(nil)
+check(app.activationPolicy() == .regular, "Minimized Settings keeps its Dock icon so it can be restored")
+settings.window?.close()
+check(app.activationPolicy() == .accessory, "Closing minimized Settings removes its Dock icon")
+settings.show()
+check(app.activationPolicy() == .regular, "Reopening the same Settings window restores the Dock icon")
+settings.window?.close()
+check(app.activationPolicy() == .accessory, "Closing reopened Settings returns Draplet to menu-bar-only mode")
 print("Passed \(assertions) lifecycle, preference, rendering, and animation checks")

@@ -53,7 +53,7 @@ components:
     height: 38pt
   toolbar-tab:
     rounded: "{rounded.navigation}"
-    height: 54pt
+    height: 42pt
 ---
 
 # Design System: Draplet
@@ -97,13 +97,13 @@ The recorded contrast review measured selected navigation text at 6.91:1 in dark
 
 **Display Font:** SF system. **Body Font:** SF system. Native controls retain their platform text behavior.
 
-The hierarchy is compact and legible: `title` for page titles, `body` for rows, `section` for semibold group labels, `secondary` for descriptions and toolbar tab labels, and `annotation` for preview notes. Toolbar symbols are regular 20-point SF Symbols; the toolbar brand label is 17-point semibold. The auto-hide value and preview clock use monospaced digits.
+The hierarchy is compact and legible: `title` for page titles, `body` for rows, `section` for semibold group labels, `secondary` for descriptions and toolbar tab labels, and `annotation` for preview notes. Toolbar symbols are regular 20-point SF Symbols; the toolbar brand label is 16-point semibold. The auto-hide value and preview clock use monospaced digits.
 
 ## Layout
 
-One unified native toolbar contains the brand, five tabs in order—General, Appearance, Left, Right, Shortcuts—and Pause/Resume. Appearance is the initial page. Tab controls are 54 points high; Appearance is 92 points wide and the other tabs are 68 points wide. Native toolbar item glass backgrounds are explicitly disabled with `isBordered = false` after custom view assignment; the only persistent tab selection surface is the app's low-opacity terracotta treatment.
+One unified native toolbar contains the brand, five tabs in order—General, Appearance, Left, Right, Shortcuts—and Pause Hiding / Resume Hiding. Appearance is the initial page. Tab controls are 42 points high inside 54-point hosts, leaving 6 points of vertical padding; Appearance is 88 points wide and the other tabs are 64 points wide. Padding must fit inside the native toolbar height, rather than enlarge the custom host and get clipped. A rectangular content shape makes each whole tab clickable. Native toolbar item glass backgrounds are explicitly disabled with `isBordered = false` after custom view assignment; the only persistent tab selection surface is the app's low-opacity terracotta treatment.
 
-The window opens with 940 × 710 points of content and saves its frame. Its AppKit minimum is 850 × 700 points; the SwiftUI content also declares an 830 × 620 minimum. The window is resizable. A vertical `ScrollView` lets longer pages and independent settings extend naturally; the footer stays outside scrolling content. Resize and scroll provide room rather than shrinking text or hiding controls.
+The window opens with 940 × 710 points of content and saves its frame. Its AppKit minimum is 850 × 700 points; the SwiftUI content also declares an 830 × 620 minimum. The window is resizable. A vertical `ScrollView` lets longer pages and independent settings extend naturally; the footer stays outside scrolling content. Resize and scroll provide room rather than shrinking text or hiding controls. Opening Settings adds Draplet to the Dock; minimizing keeps it there, and closing removes it. Full-width right-side reveal borrows focus without changing that Dock policy.
 
 Content uses the `content` inset and `section` gap. Rows place labels and wrapping detail at the left, controls at the right, using `row-horizontal` padding and the relevant vertical token. Rows have a 42-point minimum height. The footer uses 24-point horizontal and 11-point vertical padding.
 
@@ -145,13 +145,15 @@ The explicitly labeled preview uses sample Finder menus and a 9:41 clock. Its ar
 
 ### Permissions and status
 
-Permission rows show actual state and recovery actions. Background preparation and failure states appear where relevant, with progress or retry. Pause/Resume stays in the toolbar and reflects the current state.
+Permission rows show actual state and recovery actions. Background preparation and failure states appear where relevant, with progress or retry. Pause Hiding / Resume Hiding stays in the toolbar, with a tooltip explaining that both sides remain visible until resumed. A visible paused notice repeats that effect and offers Resume Hiding. Native icon pop-up menus include artwork in every choice and the selected item, including imported custom artwork.
 
 ### Delivery artwork and review
 
 The icon and drag-to-Applications installer retain approved variant E. Final native captures are `.impeccable/review/appearance-dark-final.png`, `.impeccable/review/appearance-light-final.png` and `.impeccable/review/installer.png`.
 
 **Reviewer disposition: SHIP.** The final captures show the implemented light/dark palette, clear selection and the intended installer arrangement. The implementation review records 69 passing checks plus native source/screenshot and manual settings validation for linked/independent choices, custom icon import/removal, the slider and Pause/Resume. The HTML/CSS detector was not run because this is native SwiftUI/AppKit. This disposition covers the reviewed local Settings/icon/installer work; it does not claim a public release, paid signing or notarization.
+
+**0.4.1 refinement verification:** 75 checks pass, including the real Settings window's open, minimize, close and reopen Dock lifecycle. Native UI checks confirmed the top inset in both appearances, navigation through a tab's blank corner, icon artwork and selection, and the explanatory paused notice. A Mission Control capture plus WindowServer inventory confirmed that all three overlay windows leave the screen during the overview and return afterward. Full-width reveal still brings Draplet's short menu forward with Settings closed, without adding a Dock icon. The local DMG's mounted app signature, executable and Applications shortcut were verified again.
 
 ## Do's and Don'ts
 
