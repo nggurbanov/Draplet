@@ -7,6 +7,8 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
     let separatorItem = NSStatusBar.system.statusItem(withLength: 20)
     private(set) var alwaysHiddenItem: NSStatusItem?
     lazy var engine = MenuBarEngineFactory.make(items: self)
+    private let cover = RightMenuCover()
+    private lazy var transition = RightMenuTransition(engine: engine, cover: cover)
     private let prefs = Preferences.shared
     private var collapseTimer: Timer?
     private var lastCollapse = Date.distantPast
@@ -43,11 +45,11 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
     }
     func configure() {
         updateHoverMonitor()
-        let next = "\(canManage)-\(prefs.alwaysHidden)-\(prefs.autoCollapse)-\(prefs.collapseDelay)-\(prefs.fullWidth)"
+        let next = "\(canManage)-\(prefs.alwaysHidden)-\(prefs.autoCollapse)-\(prefs.collapseDelay)-\(prefs.fullWidth)-\(MenuBarBackdrop.shared.ready)"
         guard next != configuration else { updatePresentation(); return }
         configuration = next
         collapseTimer?.invalidate()
-        engine.expand()
+        transition.cancelAndExpand()
         if prefs.alwaysHidden && alwaysHiddenItem == nil {
             let item = NSStatusBar.system.statusItem(withLength: 20)
             item.autosaveName = "Draplet.AlwaysHidden"
@@ -63,7 +65,7 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
         if canManage { scheduleCollapse() }
     }
     func updatePresentation() {
-        let collapsed = engine.state == .collapsed
+        let collapsed = !transition.expanded
         toggleItem.button?.image = IndicatorIcons.image(for: .right, expanded: !collapsed)
         toggleItem.button?.toolTip = "Draplet · Click to \(collapsed ? "reveal" : "hide") icons · Right-click for settings"
         if !prefs.rightEnabled || prefs.paused { prefs.rightStatus = "Paused" }
@@ -99,7 +101,7 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
         } else if !canManage {
             onSettings?()
         } else {
-            engine.state == .collapsed ? expand() : collapse()
+            transition.expanded ? collapse() : expand()
         }
     }
     @objc private func settings() { onSettings?() }
@@ -110,30 +112,49 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
         // This action is explicitly selected by the user; it never disables its login item.
         competingApp?.terminate()
     }
-    func collapse() {
-        guard canManage, engine.state != .calibrating, engine.isArrangementValid else { return }
+    private var animationStyle: BarAnimation {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion || !MenuBarBackdrop.shared.ready ? .hiddenBar : prefs.animation(for: .right)
+    }
+    private var animationFrame: NSRect? {
+        guard NSMenu.menuBarVisible(), let arrow = toggleItem.button?.window?.frame,
+              let screen = NSScreen.screens.first(where: { $0.frame.intersects(arrow) }) else { return nil }
+        let start = screen.auxiliaryTopRightArea?.minX ?? screen.frame.midX
+        let height = max(NSStatusBar.system.thickness, screen.safeAreaInsets.top) + 1
+        guard arrow.minX > start else { return nil }
+        return NSRect(x: start, y: screen.frame.maxY - height, width: arrow.minX - start, height: height)
+    }
+    var animationStatus: [String: Any] {
+        ["style": animationStyle.rawValue, "expanded": transition.expanded,
+         "coverVisible": cover.isVisible, "progress": cover.progress]
+    }
+    func refreshBackground() { cover.refreshBackground() }
+    func collapse(completion: ((CollapseResult) -> Void)? = nil) {
+        guard canManage, engine.isArrangementValid else { completion?(.unavailable); return }
         if prefs.alwaysHidden && !engine.isAlwaysHiddenSeparatorPlaced {
             prefs.error = "⌘-drag the dotted separator to the left of Draplet’s arrow first."
+            completion?(.unavailable)
             return
         }
         if prefs.fullWidth { NSApp.setActivationPolicy(.accessory); NSApp.deactivate() }
         revealAllMode = false
         separatorsHidden = true
         engine.updateAlwaysHiddenSection(enabled: prefs.alwaysHidden, separatorHidden: true)
-        engine.collapse { [weak self] _ in
+        transition.collapse(style: animationStyle, pace: prefs.animationPace, frame: animationFrame) { [weak self] result in
             guard let self else { return }
-            if !self.canManage { self.engine.expand() }
+            if !self.canManage { self.transition.cancelAndExpand() }
             self.lastCollapse = Date()
             self.updatePresentation()
+            completion?(result)
         }
         updatePresentation()
     }
-    func expand(all: Bool = false) {
+    func expand(all: Bool = false, onStart: @escaping () -> Void = {}) {
         collapseTimer?.invalidate()
         if all { revealAllMode = true; separatorsHidden = false }
         engine.updateAlwaysHiddenSection(enabled: canManage && prefs.alwaysHidden, separatorHidden: !revealAllMode)
-        engine.expand()
         if prefs.fullWidth && canManage { NSApp.setActivationPolicy(.regular); NSApp.activate(ignoringOtherApps: true) }
+        transition.expand(style: canManage ? animationStyle : .hiddenBar, pace: prefs.animationPace,
+                          frame: animationFrame, onStart: onStart) { [weak self] in self?.updatePresentation() }
         updatePresentation()
         if canManage { scheduleCollapse() }
     }
@@ -165,6 +186,7 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
         }
     }
     func tick() {
+        if !NSMenu.menuBarVisible(), cover.isVisible { transition.cancelAndExpand(); updatePresentation() }
         guard canManage, prefs.trigger(for: .right) == .hover, engine.state == .collapsed else { cancelHover(); return }
         guard let frame = toggleItem.button?.window?.frame,
               frame.insetBy(dx: -3, dy: -3).contains(NSEvent.mouseLocation) else { cancelHover(); return }
@@ -197,7 +219,7 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
         if let localMouseMonitor { NSEvent.removeMonitor(localMouseMonitor) }
         collapseTimer?.invalidate()
         engine.updateAlwaysHiddenSection(enabled: false, separatorHidden: false)
-        engine.expand()
+        transition.cancelAndExpand(); cover.stop()
         for item in [toggleItem, separatorItem, alwaysHiddenItem].compactMap({ $0 }) { NSStatusBar.system.removeStatusItem(item) }
     }
 }

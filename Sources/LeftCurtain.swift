@@ -55,6 +55,8 @@ final class CoverView: NSView {
     var menuStart: CGFloat = 120 { didSet { needsDisplay = true } }
     var menuEnd: CGFloat = 420 { didSet { needsDisplay = true } }
     var progress = 0.0 { didSet { needsDisplay = true } }
+    var animationStyle = BarAnimation.curtain { didSet { needsDisplay = true } }
+    var screenFrame = NSRect.zero
     let font = NSFontManager.shared.convert(NSFont.menuBarFont(ofSize: 0), toHaveTrait: .boldFontMask)
     override var isOpaque: Bool { false }
 
@@ -65,24 +67,17 @@ final class CoverView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         NSColor.clear.setFill()
         bounds.fill(using: .copy)
-        NSColor.black.setFill()
         // The title never swaps with the native title. Only command menus are uncovered.
-        NSRect(x: 0, y: 0, width: menuStart, height: bounds.height).fill()
-        if progress <= 0 {
-            bounds.fill()
-        } else if progress < 1 {
-            let feather: CGFloat = 14
-            let edge = menuStart + (max(menuStart, menuEnd) - menuStart + feather) * progress
-            let gradientStart = max(menuStart, edge - feather)
-            NSGradient(starting: .clear, ending: .black)?.draw(
-                in: NSRect(x: gradientStart, y: 0, width: max(0.01, edge - gradientStart), height: bounds.height), angle: 0)
-            NSColor.black.setFill()
-            NSRect(x: min(edge, bounds.width), y: 0, width: max(0, bounds.width - edge), height: bounds.height).fill()
+        let prefix = NSRect(x: 0, y: 0, width: menuStart, height: bounds.height)
+        MenuBarBackdrop.shared.draw(in: prefix, screenRect: prefix.offsetBy(dx: screenFrame.minX, dy: screenFrame.minY))
+        let suffix = NSRect(x: menuStart, y: 0, width: max(0, bounds.width - menuStart), height: bounds.height)
+        MenuMaskDrawing.draw(in: suffix, progress: progress, style: animationStyle, extent: max(0, menuEnd - menuStart)) {
+            MenuBarBackdrop.shared.draw(in: suffix, screenRect: suffix.offsetBy(dx: self.screenFrame.minX, dy: self.screenFrame.minY), operation: .sourceIn)
         }
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: font, .foregroundColor: NSColor.white, .paragraphStyle: paragraph
+            .font: font, .foregroundColor: MenuBarBackdrop.shared.foreground, .paragraphStyle: paragraph
         ]
         let name = applicationName as NSString
         let size = name.size(withAttributes: attributes)
@@ -172,7 +167,7 @@ func setReveal(_ open: Bool, _ reason: String, animated: Bool = true) {
     animationFrom = view.progress
     animationTarget = target
     animationStart = ProcessInfo.processInfo.systemUptime
-    animationDuration = open ? 0.18 : 0.16
+    animationDuration = prefs.animationPace.duration(opening: open)
     animationFrameCount = 0
     animationFirstFrameDelay = nil
     animationRunning = animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion && abs(target - view.progress) > 0.001
@@ -327,7 +322,9 @@ func start() {
     cover.hasShadow = false
     cover.hidesOnDeactivate = false
     cover.ignoresMouseEvents = true
-    cover.contentView = CoverView(frame: NSRect(origin: .zero, size: coverFrame.size))
+    let view = CoverView(frame: NSRect(origin: .zero, size: coverFrame.size))
+    view.screenFrame = coverFrame
+    cover.contentView = view
     panel = cover
     enabled = true
     currentPID = 0
@@ -349,9 +346,23 @@ func start() {
 final class IndicatorButton: NSButton {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
+final class IndicatorBackdrop: NSView {
+    override var isOpaque: Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        MenuBarBackdrop.shared.draw(in: bounds, screenRect: window?.frame ?? .zero)
+    }
+}
+
+func refreshBackground() {
+    panel?.contentView?.needsDisplay = true
+    clickPanel?.contentView?.needsDisplay = true
+    (clickPanel?.contentView?.subviews.first as? NSButton)?.contentTintColor = MenuBarBackdrop.shared.foreground
+}
 
 func refreshPreferences() {
+    (panel?.contentView as? CoverView)?.animationStyle = prefs.animation(for: .left)
     panel?.contentView?.needsDisplay = true
+    refreshBackground()
     enteredAt = nil
     manuallyCollapsed = false
     updateClickTarget()
@@ -377,7 +388,10 @@ func updateClickTarget() {
     let openFrame = Self.indicatorFrame(cover: coverFrame, titleWidth: width, menuEnd: view.menuEnd, expanded: true)
     let progress = min(1, max(0, view.progress))
     let frame: NSRect
-    if openFrame.minX >= closedFrame.minX {
+    if view.animationStyle == .fade {
+        // A moving opaque button would punch a black hole in fading headings.
+        frame = progress > 0 ? openFrame : closedFrame
+    } else if openFrame.minX >= closedFrame.minX {
         // Ride the wipe rather than teleporting onto File before it is covered.
         frame = NSRect(x: closedFrame.minX + (openFrame.minX - closedFrame.minX) * progress,
                        y: closedFrame.minY, width: closedFrame.width + (openFrame.width - closedFrame.width) * progress,
@@ -393,15 +407,15 @@ func updateClickTarget() {
         // macOS hit-tests transparent panels through to the native File menu.
         // The button occupies the same black pixels as the cover, so an opaque
         // patch captures the click without changing the visible backdrop.
-        hit.isReleasedWhenClosed = false; hit.isOpaque = true; hit.backgroundColor = .black
+        hit.isReleasedWhenClosed = false; hit.isOpaque = true; hit.backgroundColor = .windowBackgroundColor
         hit.hasShadow = false; hit.hidesOnDeactivate = false
-        let content = NSView(frame: NSRect(origin: .zero, size: frame.size))
+        let content = IndicatorBackdrop(frame: NSRect(origin: .zero, size: frame.size))
         let button = IndicatorButton(frame: content.bounds)
         button.title = ""; button.target = self; button.action = #selector(indicatorClicked)
         button.autoresizingMask = [.width, .height]
         button.isBordered = false; button.focusRingType = .none
         button.imagePosition = .imageOnly; button.imageScaling = .scaleProportionallyDown
-        button.contentTintColor = .white
+        button.contentTintColor = MenuBarBackdrop.shared.foreground
         button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         content.addSubview(button)
         hit.contentView = content

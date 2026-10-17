@@ -25,14 +25,26 @@ final class Preferences: ObservableObject {
     @Published var sharedTrigger: RevealTrigger { didSet { save(sharedTrigger.rawValue, "sharedTrigger") } }
     @Published var leftTrigger: RevealTrigger { didSet { save(leftTrigger.rawValue, "leftTrigger") } }
     @Published var rightTrigger: RevealTrigger { didSet { save(rightTrigger.rawValue, "rightTrigger") } }
+    @Published var sameAnimation: Bool { didSet { save(sameAnimation, "sameAnimation") } }
+    @Published var sharedAnimation: BarAnimation { didSet { save(sharedAnimation.rawValue, "sharedAnimation") } }
+    @Published var leftAnimation: BarAnimation { didSet { save(leftAnimation.rawValue, "leftAnimation") } }
+    @Published var rightAnimation: BarAnimation { didSet { save(rightAnimation.rawValue, "rightAnimation") } }
+    @Published var backgroundMode: BackgroundMode { didSet { save(backgroundMode.rawValue, "backgroundMode") } }
+    @Published var animationPace: AnimationPace { didSet { save(animationPace.rawValue, "animationPace") } }
     @Published var alwaysHidden: Bool { didSet { save(alwaysHidden, "alwaysHidden") } }
     @Published var fullWidth: Bool { didSet { save(fullWidth, "fullWidth") } }
     @Published var shortcut: Int { didSet { save(shortcut, "shortcut") } }
     @Published var loginEnabled = SMAppService.mainApp.status == .enabled
     @Published var permissionGranted = AXIsProcessTrusted()
+    @Published var backgroundPermission = CGPreflightScreenCaptureAccess()
+    @Published var backgroundReady = false
+    @Published var backgroundError = ""
     @Published var rightStatus = "Expanded"
     @Published var paused = false
     @Published var error = ""
+    var needsBackground: Bool {
+        !paused && ((leftEnabled && permissionGranted) || (rightEnabled && animation(for: .right) != .hiddenBar))
+    }
     init(store: UserDefaults = .standard) {
         self.store = store
         store.register(defaults: ["leftEnabled": true, "rightEnabled": true, "autoCollapse": true,
@@ -55,6 +67,15 @@ final class Preferences: ObservableObject {
         sharedTrigger = initialTrigger
         leftTrigger = RevealTrigger(rawValue: store.string(forKey: "leftTrigger") ?? "") ?? initialTrigger
         rightTrigger = RevealTrigger(rawValue: store.string(forKey: "rightTrigger") ?? "") ?? initialTrigger
+        sameAnimation = store.object(forKey: "sameAnimation") as? Bool ?? true
+        let initialAnimation = BarAnimation(rawValue: store.string(forKey: "sharedAnimation") ?? "") ?? .curtain
+        let sharedStyle = initialAnimation == .hiddenBar ? BarAnimation.curtain : initialAnimation
+        sharedAnimation = sharedStyle
+        let savedLeft = BarAnimation(rawValue: store.string(forKey: "leftAnimation") ?? "") ?? sharedStyle
+        leftAnimation = savedLeft == .hiddenBar ? .curtain : savedLeft
+        rightAnimation = BarAnimation(rawValue: store.string(forKey: "rightAnimation") ?? "") ?? sharedStyle
+        backgroundMode = BackgroundMode(rawValue: store.string(forKey: "backgroundMode") ?? "") ?? .cached
+        animationPace = AnimationPace(rawValue: store.string(forKey: "animationPace") ?? "") ?? .originalLeft
         alwaysHidden = store.bool(forKey: "alwaysHidden")
         fullWidth = store.bool(forKey: "fullWidth")
         shortcut = store.integer(forKey: "shortcut")
@@ -62,6 +83,15 @@ final class Preferences: ObservableObject {
     func icon(for side: BarSide) -> IndicatorStyle { sameIcons ? sharedIcon : (side == .left ? leftIcon : rightIcon) }
     func customIcon(for side: BarSide) -> Data? { sameIcons ? sharedCustomIcon : (side == .left ? leftCustomIcon : rightCustomIcon) }
     func trigger(for side: BarSide) -> RevealTrigger { sameTrigger ? sharedTrigger : (side == .left ? leftTrigger : rightTrigger) }
+    func animation(for side: BarSide) -> BarAnimation {
+        let value = sameAnimation ? sharedAnimation : (side == .left ? leftAnimation : rightAnimation)
+        return side == .left && value == .hiddenBar ? .curtain : value
+    }
+    func linkAnimations(_ linked: Bool) {
+        if linked { sharedAnimation = leftAnimation == .hiddenBar ? .curtain : leftAnimation }
+        else { leftAnimation = sharedAnimation; rightAnimation = sharedAnimation }
+        sameAnimation = linked
+    }
     func linkIcons(_ linked: Bool) {
         if linked { sharedIcon = leftIcon; sharedCustomIcon = leftCustomIcon }
         else { leftIcon = sharedIcon; rightIcon = sharedIcon; leftCustomIcon = sharedCustomIcon; rightCustomIcon = sharedCustomIcon }

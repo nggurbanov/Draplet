@@ -9,11 +9,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var settings: SettingsController!
     var pulse: Timer?
     var observers: [NSObjectProtocol] = []
+    var appearanceObserver: NSKeyValueObservation?
     var hotkey: EventHotKeyRef?
     var eventHandler: EventHandlerRef?
     var wasAuthorized = false
     var hiddenBarWasRunning = false
     var terminating = false
+    var previewGeneration = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let siblings = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "com.tyrell.Draplet")
@@ -25,16 +27,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         right = RightCurtain()
         settings = SettingsController(prefs: prefs, requestPermission: { [weak self] in self?.requestPermission() },
                                       replaceHiddenBar: { [weak self] in self?.right.replaceHiddenBar() },
-                                      revealBoth: { [weak self] in self?.revealBoth() }, pause: { [weak self] in self?.togglePause() })
+                                      revealBoth: { [weak self] in self?.revealBoth() }, pause: { [weak self] in self?.togglePause() },
+                                      previewAnimations: { [weak self] in self?.previewAnimations() })
         right.onSettings = { [weak self] in self?.settings.show() }
         left.onSettings = { [weak self] in self?.settings.show() }
         right.onPause = { [weak self] in self?.togglePause() }
         right.onRevealAll = { [weak self] in self?.revealBoth() }
         right.isSettingsVisible = { [weak self] in self?.settings.window?.isVisible ?? false }
         observers.append(NotificationCenter.default.addObserver(forName: .drapletPreferencesChanged, object: nil, queue: .main) { [weak self] _ in self?.applyPreferences() })
+        observers.append(NotificationCenter.default.addObserver(forName: MenuBarBackdrop.didChange, object: nil, queue: .main) { [weak self] _ in
+            guard let self, !self.terminating else { return }
+            let error = MenuBarBackdrop.shared.failure ?? ""
+            if self.prefs.backgroundError != error { self.prefs.backgroundError = error }
+            if self.prefs.backgroundReady != MenuBarBackdrop.shared.ready {
+                self.prefs.backgroundReady = MenuBarBackdrop.shared.ready; self.applyPreferences()
+            }
+            self.left.refreshBackground(); self.right.refreshBackground()
+        })
+        observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { MenuBarBackdrop.shared.refreshAppearance() }
+        })
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in self?.refreshDisplays() })
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in self?.refreshDisplays() })
-        observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in self?.left.syncVisibility() })
+        observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in self?.left.syncVisibility(); MenuBarBackdrop.shared.refreshAppearance() })
+        appearanceObserver = NSApp.observe(\.effectiveAppearance, options: [.new]) { _, _ in
+            DispatchQueue.main.async { MenuBarBackdrop.shared.refreshAppearance() }
+        }
         wasAuthorized = AXIsProcessTrusted()
         hiddenBarWasRunning = right.competingApp != nil
         applyPreferences()
@@ -43,7 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         RunLoop.main.add(timer, forMode: .common)
         let firstRun = !UserDefaults.standard.bool(forKey: "hasLaunched")
         UserDefaults.standard.set(true, forKey: "hasLaunched")
-        if firstRun || !wasAuthorized || CommandLine.arguments.contains("--settings") { settings.show() }
+        if firstRun || !wasAuthorized || !prefs.backgroundPermission || CommandLine.arguments.contains("--settings") { settings.show() }
         if CommandLine.arguments.contains("--test-controls") { testControls() }
         if let index = CommandLine.arguments.firstIndex(of: "--quit-after"), CommandLine.arguments.count > index + 1,
            let seconds = Double(CommandLine.arguments[index + 1]) {
@@ -52,8 +70,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSLog("Draplet ready; accessibility=%d; nativeVisibility=%d", wasAuthorized, HBNativeVisibilityIsAvailable())
     }
     func applyPreferences() {
+        guard !terminating else { return }
+        previewGeneration += 1
         prefs.permissionGranted = AXIsProcessTrusted()
-        if prefs.leftEnabled && !prefs.paused && prefs.permissionGranted { left.start() }
+        prefs.backgroundPermission = MenuBarBackdrop.shared.permission
+        if prefs.needsBackground { MenuBarBackdrop.shared.start(mode: prefs.backgroundMode) } else { MenuBarBackdrop.shared.stop() }
+        if prefs.leftEnabled && !prefs.paused && prefs.permissionGranted && MenuBarBackdrop.shared.ready { left.start() }
         else { left.stop() }
         left.refreshPreferences()
         right.configure()
@@ -61,20 +83,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func refreshDisplays() {
         left.stop()
+        MenuBarBackdrop.shared.restart()
         applyPreferences()
         right.engine.invalidateLayout()
     }
     func tick() {
         let authorized = AXIsProcessTrusted()
         let competing = right.competingApp != nil
-        if wasAuthorized != authorized || hiddenBarWasRunning != competing {
+        if wasAuthorized != authorized || hiddenBarWasRunning != competing || prefs.backgroundPermission != MenuBarBackdrop.shared.permission {
             wasAuthorized = authorized; hiddenBarWasRunning = competing
             applyPreferences()
         }
         right.tick()
     }
     @objc func togglePause() { prefs.paused.toggle(); applyPreferences() }
-    @objc func revealBoth() { left.revealForShortcut(); right.expand(all: true) }
+    @objc func revealBoth() { right.expand(all: true) { [weak self] in self?.left.revealForShortcut() } }
+    func previewAnimations() {
+        previewGeneration += 1; let token = previewGeneration
+        left.manualUntil = Date().addingTimeInterval(5)
+        left.setReveal(false, "preview", animated: false)
+        right.collapse { [weak self] _ in
+            guard let self, token == self.previewGeneration else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                guard let self, token == self.previewGeneration else { return }
+                self.right.expand { [weak self] in
+                    guard let self, token == self.previewGeneration else { return }
+                    self.left.revealForShortcut()
+                    let hold = self.prefs.animationPace.duration(opening: true) + 1.2
+                    DispatchQueue.main.asyncAfter(deadline: .now() + hold) { [weak self] in
+                        guard let self, token == self.previewGeneration, !self.right.nativeMenuOpen else { return }
+                        self.left.manualUntil = Date().addingTimeInterval(3)
+                        self.left.setReveal(false, "preview")
+                        self.right.collapse()
+                    }
+                }
+            }
+        }
+    }
     @objc func showSettings() { settings.show() }
     func requestPermission() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
@@ -125,7 +170,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) { cleanup() }
     func cleanup() {
         guard !terminating else { return }; terminating = true
-        pulse?.invalidate(); left.stop(); right?.stop()
+        appearanceObserver = nil
+        pulse?.invalidate(); left.stop(); right?.stop(); MenuBarBackdrop.shared.stop()
         if let hotkey { UnregisterEventHotKey(hotkey) }
         if let eventHandler { RemoveEventHandler(eventHandler) }
         for observer in observers {
@@ -147,6 +193,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             "frame": self.left.frameJSON(self.left.coverFrame), "level": self.left.coverLevel.rawValue,
                             "leftTrigger": self.prefs.trigger(for: .left).rawValue, "rightTrigger": self.prefs.trigger(for: .right).rawValue,
                             "leftIcon": self.prefs.icon(for: .left).rawValue, "rightIcon": self.prefs.icon(for: .right).rawValue,
+                            "pace": self.prefs.animationPace.rawValue, "leftAnimation": self.prefs.animation(for: .left).rawValue,
+                            "backgroundMode": self.prefs.backgroundMode.rawValue, "streaming": MenuBarBackdrop.shared.streaming,
+                            "backgroundSnapshots": MenuBarBackdrop.shared.snapshotCount, "backgroundFrames": MenuBarBackdrop.shared.frameCount,
+                            "backgroundReady": MenuBarBackdrop.shared.ready, "backgroundPermission": MenuBarBackdrop.shared.permission,
+                            "rightAnimation": self.right.animationStatus,
                             "hitWindow": self.left.clickPanel?.windowNumber ?? 0,
                             "hitVisible": self.left.clickPanel?.isVisible ?? false,
                             "leftArrowFrame": self.left.frameJSON(self.left.clickPanel?.frame ?? .zero),
@@ -158,6 +209,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     case "reveal": self.revealBoth()
                     case "settings": self.settings.show()
                     case "left-toggle": self.left.indicatorClicked()
+                    case "preview": self.previewAnimations()
+                    case "pace-a": self.prefs.animationPace = .originalLeft
+                    case "pace-b": self.prefs.animationPace = .originalRight
+                    case "curtain": self.prefs.sameAnimation = true; self.prefs.sharedAnimation = .curtain
+                    case "fade": self.prefs.sameAnimation = true; self.prefs.sharedAnimation = .fade
+                    case "native-right": self.prefs.linkAnimations(false); self.prefs.rightAnimation = .hiddenBar
+                    case "cached": self.prefs.backgroundMode = .cached
+                    case "live": self.prefs.backgroundMode = .live
+                    case "background-refresh": MenuBarBackdrop.shared.refreshAppearance()
+                    case "background-save":
+                        if let image = MenuBarBackdrop.shared.snapshot {
+                            try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "/tmp/draplet-matched-background.png"))
+                        }
                     case "both-click": self.prefs.sharedTrigger = .click; self.prefs.sameTrigger = true
                     case "both-hover": self.prefs.sharedTrigger = .hover; self.prefs.sameTrigger = true
                     case "default-icons":

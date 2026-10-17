@@ -8,6 +8,7 @@ struct SettingsView: View {
     let replaceHiddenBar: () -> Void
     let revealBoth: () -> Void
     let pause: () -> Void
+    let previewAnimations: () -> Void
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
@@ -25,6 +26,52 @@ struct SettingsView: View {
                         Text("Draplet needs Accessibility access to read menu positions. Grant access, then return here; Draplet will pick it up automatically.")
                         Button("Grant Accessibility Access…", action: requestPermission)
                     }
+                }
+                if prefs.needsBackground && !prefs.backgroundPermission {
+                    Section("Match your menu bar") {
+                        Text("Allow screen capture so Draplet can match the actual menu-bar background and contrast. It uses only the narrow menu-bar strip, locally in memory.")
+                            .font(.callout)
+                        Button("Enable Background Matching…") { MenuBarBackdrop.shared.requestPermission() }
+                        Text("macOS calls this Screen & System Audio Recording. Draplet does not capture audio. The left cover waits for access; native right-side hiding remains available.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                } else if prefs.needsBackground && !prefs.backgroundReady {
+                    if prefs.backgroundError.isEmpty {
+                        Text("Preparing the menu-bar background…").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text("Background matching is unavailable. Check screen-capture access, then retry.").font(.callout)
+                        HStack {
+                            Button("Check Access…") { MenuBarBackdrop.shared.requestPermission() }
+                            Button("Retry") { MenuBarBackdrop.shared.restart() }
+                        }
+                    }
+                }
+                Section("Animations") {
+                    Toggle("Use the same animation on both sides", isOn: Binding(get: { prefs.sameAnimation }, set: { prefs.linkAnimations($0) }))
+                    if prefs.sameAnimation {
+                        animationPicker("Both sides", selection: $prefs.sharedAnimation, side: .left)
+                    } else {
+                        animationPicker("Left", selection: $prefs.leftAnimation, side: .left)
+                        animationPicker("Right", selection: $prefs.rightAnimation, side: .right)
+                    }
+                    Picker("Timing · both sides", selection: $prefs.animationPace) {
+                        ForEach(AnimationPace.allCases, id: \.self) { pace in Text(pace.title).tag(pace) }
+                    }.pickerStyle(.segmented)
+                    Text(prefs.animationPace == .originalLeft ? "A: 180 ms reveal · 160 ms hide. The original left-side timing." : "B: 550 ms reveal · 250 ms hide. Based on the native right-side motion measured on this Mac.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("Curtain opens inward toward the notch. Fade dissolves in place. The right-only Hidden Bar option keeps its native movement and timing.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Preview Both Sides", action: previewAnimations)
+                }
+                Section("Menu-bar background") {
+                    Picker("Update", selection: $prefs.backgroundMode) {
+                        ForEach(BackgroundMode.allCases, id: \.self) { mode in Text(mode.title).tag(mode) }
+                    }.pickerStyle(.segmented)
+                    Text(prefs.backgroundMode == .cached
+                         ? "Capture once, then refresh when the wallpaper, Space or appearance changes. Best for still wallpapers."
+                         : "Keep the cover moving with an animated wallpaper. Uses more energy than Cached.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Refresh Background") { MenuBarBackdrop.shared.refreshAppearance() }
                 }
                 Section("Icons") {
                     Toggle("Use the same icon on both sides", isOn: Binding(get: { prefs.sameIcons }, set: { prefs.linkIcons($0) }))
@@ -100,7 +147,7 @@ struct SettingsView: View {
                 }
                 if !prefs.error.isEmpty { Text(prefs.error).foregroundStyle(.red).font(.caption) }
                 Section {
-                    Text("Draplet 0.2.0 · Free and open source\nRight-side hiding and the Hidden Bar icons include work by Dwarves Foundation, under the MIT license.")
+                    Text("Draplet 0.3.0 · Free and open source\nRight-side hiding and the Hidden Bar icons include work by Dwarves Foundation, under the MIT license.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }.formStyle(.grouped)
@@ -121,13 +168,19 @@ struct SettingsView: View {
             ForEach(RevealTrigger.allCases, id: \.self) { trigger in Text(trigger.title).tag(trigger) }
         }.pickerStyle(.segmented)
     }
+    private func animationPicker(_ title: String, selection: Binding<BarAnimation>, side: BarSide) -> some View {
+        Picker(title, selection: selection) {
+            ForEach(BarAnimation.choices(for: side), id: \.self) { style in Text(style.title).tag(style) }
+        }
+    }
 }
 
 final class SettingsController: NSWindowController {
     init(prefs: Preferences, requestPermission: @escaping () -> Void,
-         replaceHiddenBar: @escaping () -> Void, revealBoth: @escaping () -> Void, pause: @escaping () -> Void) {
+         replaceHiddenBar: @escaping () -> Void, revealBoth: @escaping () -> Void, pause: @escaping () -> Void,
+         previewAnimations: @escaping () -> Void) {
         let view = SettingsView(prefs: prefs, requestPermission: requestPermission,
-                                replaceHiddenBar: replaceHiddenBar, revealBoth: revealBoth, pause: pause)
+                                replaceHiddenBar: replaceHiddenBar, revealBoth: revealBoth, pause: pause, previewAnimations: previewAnimations)
         let window = NSWindow(contentViewController: NSHostingController(rootView: view))
         window.title = "Draplet Settings"
         window.styleMask = [.titled, .closable, .miniaturizable]

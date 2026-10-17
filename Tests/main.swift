@@ -101,6 +101,10 @@ if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
     curtain.setReveal(false, "test-app-switch", animated: false)
     check(testView.progress == 0 && curtain.clickPanel!.frame.minX == collapsedX,
           "An immediate app-switch cover also puts its toggle in the closed position immediately")
+    testView.animationStyle = .fade; testView.progress = 0.5
+    curtain.updateClickTarget()
+    check(curtain.clickPanel!.frame.minX == expandedX,
+          "Fade keeps its opaque toggle clear of partially visible native headings")
     curtain.stop()
 }
 let items = Items(), reader = Inventory(), bridge = Visibility()
@@ -132,6 +136,31 @@ let suite = "Draplet.Tests.\(UUID().uuidString)"
 let store = UserDefaults(suiteName: suite)!
 defer { store.removePersistentDomain(forName: suite) }
 let prefs = Preferences(store: store)
+check(prefs.backgroundMode == .cached, "Static backgrounds use a one-shot cache by default")
+prefs.backgroundMode = .live
+check(Preferences(store: store).backgroundMode == .live, "Animated-wallpaper mode survives a restart")
+let wallpaperFixture = FileManager.default.temporaryDirectory.appendingPathComponent("Draplet-wallpaper-\(UUID().uuidString)")
+try Data([1, 2, 3]).write(to: wallpaperFixture)
+let originalWallpaper = WallpaperFingerprint(url: wallpaperFixture, options: "fill", storeURL: nil)
+try Data([4, 5, 6, 7]).write(to: wallpaperFixture)
+let replacedWallpaper = WallpaperFingerprint(url: wallpaperFixture, options: "fill", storeURL: nil)
+check(originalWallpaper != replacedWallpaper, "Replacing a wallpaper at the same URL invalidates its cache")
+check(replacedWallpaper != WallpaperFingerprint(url: wallpaperFixture, options: "fit", storeURL: nil),
+      "A wallpaper scaling change invalidates its cache even when the file is unchanged")
+check(replacedWallpaper == WallpaperFingerprint(url: wallpaperFixture, options: "fill", storeURL: nil),
+      "An unchanged wallpaper stays cached")
+try FileManager.default.removeItem(at: wallpaperFixture)
+check(prefs.sameAnimation && prefs.animation(for: .left) == .curtain && prefs.animation(for: .right) == .curtain,
+      "Mirrored curtains are the shared default")
+prefs.sharedAnimation = .fade; prefs.linkAnimations(false); prefs.rightAnimation = .hiddenBar
+check(prefs.animation(for: .left) == .fade && prefs.animation(for: .right) == .hiddenBar,
+      "Native Hidden Bar can be selected independently on the right")
+prefs.linkAnimations(true)
+check(prefs.animation(for: .right) == .fade && !BarAnimation.choices(for: .left).contains(.hiddenBar),
+      "Relinking uses the left style and never offers native hiding on the left")
+prefs.animationPace = .originalRight
+check(Preferences(store: store).animationPace == .originalRight,
+      "The shared A/B timing choice survives a restart")
 check(prefs.sameIcons && prefs.icon(for: .left) == prefs.icon(for: .right), "Icons match by default")
 check(prefs.sameTrigger && prefs.trigger(for: .left) == .hover && prefs.trigger(for: .right) == .hover, "Reveal defaults are consistent")
 prefs.sharedIcon = .hiddenBar
@@ -180,4 +209,114 @@ check(rejected, "Invalid custom image is rejected before saving")
 restored.removeCustomIcon(side: nil)
 let removed = Preferences(store: store)
 check(removed.sharedCustomIcon == nil && removed.sharedIcon == .chevron, "Removing custom artwork restores a working preset and persists")
-print("Passed \(assertions) lifecycle, preference, and custom-icon checks")
+
+func mask(_ style: BarAnimation, mirrored: Bool = false, progress: Double = 0.5) -> NSBitmapImageRep {
+    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 100, pixelsHigh: 12, bitsPerSample: 8,
+                              samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    NSGraphicsContext.saveGraphicsState(); NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    let rect = NSRect(x: 0, y: 0, width: 100, height: 12)
+    NSColor.clear.setFill(); rect.fill(using: .copy)
+    MenuMaskDrawing.draw(in: rect, progress: progress, style: style, mirrored: mirrored)
+    NSGraphicsContext.restoreGraphicsState()
+    return rep
+}
+let leftMask = mask(.curtain), rightMask = mask(.curtain, mirrored: true), fadeMask = mask(.fade)
+check(leftMask.colorAt(x: 10, y: 6)!.alphaComponent < 0.01 && leftMask.colorAt(x: 90, y: 6)!.alphaComponent > 0.99,
+      "The left curtain reveals toward the notch")
+check(rightMask.colorAt(x: 10, y: 6)!.alphaComponent > 0.99 && rightMask.colorAt(x: 90, y: 6)!.alphaComponent < 0.01,
+      "The right curtain mirrors the reveal toward the notch")
+check(abs(fadeMask.colorAt(x: 10, y: 6)!.alphaComponent - 0.5) < 0.01 && abs(fadeMask.colorAt(x: 90, y: 6)!.alphaComponent - 0.5) < 0.01,
+      "Fade changes opacity uniformly instead of wiping")
+check(mask(.curtain, progress: 1).colorAt(x: 50, y: 6)!.alphaComponent == 0,
+      "A fully revealed cover is completely transparent")
+func nativeFixture(light: Bool, transparent: Bool = false) -> CGImage {
+    let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 200, pixelsHigh: 33, bitsPerSample: 8,
+                              samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+    for y in 0..<33 {
+        for x in 0..<200 {
+            let glyph = (y >= 7 && y < 26) && ((x >= 16 && x < 35) || (x > 50 && x % 20 < 5))
+            let shade = light ? 0.85 : (0.1 + Double(y) * 0.003)
+            let value = glyph ? (light ? 0.0 : 1.0) : shade
+            let color = NSColor(deviceRed: value, green: value, blue: value, alpha: glyph || !transparent ? 1 : 0)
+            rep.setColor(color, atX: x, y: y)
+        }
+    }
+    return rep.cgImage!
+}
+let opaqueTreatment = NativeBarTreatment(native: nativeFixture(light: false), logicalWidth: 200)!
+let nativeRows = NSBitmapImageRep(cgImage: opaqueTreatment.image)
+check(abs(nativeRows.colorAt(x: 0, y: 15)!.redComponent - 0.145) < 0.01,
+      "The native opaque treatment is recovered without copying white menu glyphs")
+check(nativeRows.colorAt(x: 0, y: 2)!.redComponent < nativeRows.colorAt(x: 0, y: 30)!.redComponent,
+      "Native vertical shading keeps its orientation")
+check(opaqueTreatment.foreground == .white && NativeBarTreatment(native: nativeFixture(light: true), logicalWidth: 200)!.foreground == .black,
+      "Title contrast follows the native Apple glyph in light and dark bars")
+let transparentTreatment = NativeBarTreatment(native: nativeFixture(light: false, transparent: true), logicalWidth: 200)!
+check(NSBitmapImageRep(cgImage: transparentTreatment.image).colorAt(x: 0, y: 15)!.alphaComponent == 0,
+      "A transparent native bar leaves the exact underlying wallpaper visible")
+let colorMask = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 100, pixelsHigh: 12, bitsPerSample: 8,
+                                samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+NSGraphicsContext.saveGraphicsState(); NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: colorMask)
+NSColor.clear.setFill(); NSRect(x: 0, y: 0, width: 100, height: 12).fill(using: .copy)
+MenuMaskDrawing.draw(in: NSRect(x: 0, y: 0, width: 100, height: 12), progress: 0.5, style: .fade) {
+    NSColor.red.setFill(); NSRect(x: 0, y: 0, width: 100, height: 12).fill(using: .sourceIn)
+}
+NSGraphicsContext.restoreGraphicsState()
+let fadedBackground = colorMask.colorAt(x: 50, y: 6)!
+check(fadedBackground.redComponent > 0.99 && fadedBackground.greenComponent < 0.01 && abs(fadedBackground.alphaComponent - 0.5) < 0.01,
+      "Fade applies its alpha to the actual background rather than blending in black")
+
+final class TransitionEngine: MenuBarEngine {
+    var state = MenuBarEngineState.expanded
+    var isArrangementValid = true, isAlwaysHiddenSeparatorPlaced = true
+    var pending: ((CollapseResult) -> Void)?
+    var collapses = 0
+    func collapse(completion: @escaping (CollapseResult) -> Void) { collapses += 1; state = .calibrating; pending = completion }
+    func expand() { state = .expanded }
+    func updateAlwaysHiddenSection(enabled: Bool, separatorHidden: Bool) {}
+    func invalidateLayout() {}
+    func finish(_ result: CollapseResult) { state = result == .collapsed ? .collapsed : .expanded; let callback = pending; pending = nil; callback?(result) }
+}
+final class TestCover: TransitionCover {
+    var isVisible = false, progress = 1.0, target = 1.0, duration = 0.0
+    var pending: (() -> Void)?
+    func prepare(frame: NSRect, progress: Double, style: BarAnimation) { isVisible = true; self.progress = progress }
+    func animate(to target: Double, duration: Double, completion: @escaping () -> Void) { self.target = target; self.duration = duration; pending = completion }
+    func cancelAnimation() { pending = nil }
+    func dismiss() { isVisible = false; cancelAnimation() }
+    func finish() { progress = target; let callback = pending; pending = nil; callback?() }
+}
+var scheduled: [(Double, () -> Void)] = []
+func runScheduled(_ delay: Double) {
+    let matching = scheduled.filter { $0.0 == delay }; scheduled.removeAll { $0.0 == delay }
+    matching.forEach { $0.1() }
+}
+let visualEngine = TransitionEngine(), visualCover = TestCover()
+let transitions = RightMenuTransition(engine: visualEngine, cover: visualCover, schedule: { scheduled.append(($0, $1)) })
+var completed = 0
+transitions.collapse(style: .curtain, pace: .originalLeft, frame: cover) { _ in completed += 1 }
+check(visualEngine.collapses == 0 && visualCover.isVisible && visualCover.duration == 0.16,
+      "Icons stay native and stationary until the visual curtain finishes closing")
+visualCover.finish()
+let staleCollapse = visualEngine.pending
+check(visualEngine.collapses == 1, "Native hiding starts only behind a completely opaque cover")
+var starts = 0
+transitions.expand(style: .fade, pace: .originalRight, frame: cover, onStart: { starts += 1 }) {}
+staleCollapse?(.collapsed)
+runScheduled(RightMenuTransition.revealPreparation)
+check(transitions.expanded && visualCover.target == 1 && visualCover.duration == 0.55 && starts == 1,
+      "Reversing a pending hide preserves the chosen style and synchronized reveal timing")
+visualCover.finish(); runScheduled(RightMenuTransition.hideSettling)
+check(!visualCover.isVisible && completed == 0, "A stale native completion cannot cover or re-hide a newer reveal")
+transitions.collapse(style: .fade, pace: .originalRight, frame: cover) { _ in completed += 1 }
+visualCover.finish(); visualEngine.finish(.unavailable)
+check(transitions.expanded && !visualCover.isVisible && completed == 1, "Native errors fail open without leaving a black cover")
+transitions.collapse(style: .curtain, pace: .originalLeft, frame: cover) { _ in completed += 1 }
+visualCover.finish(); runScheduled(2)
+check(transitions.expanded && visualEngine.state == .expanded && !visualCover.isVisible && completed == 2,
+      "A stalled native hide times out, cancels its assertion, and restores the bar")
+transitions.collapse(style: .hiddenBar, pace: .originalLeft, frame: cover) { _ in completed += 1 }
+check(!visualCover.isVisible && visualEngine.state == .calibrating, "Hidden Bar bypasses every custom visual cover")
+visualEngine.finish(.collapsed); runScheduled(0)
+check(completed == 3, "Native Hidden Bar completes without a custom settling delay")
+print("Passed \(assertions) lifecycle, preference, rendering, and animation checks")
