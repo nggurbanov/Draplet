@@ -203,8 +203,23 @@
           "zero black-bar mismatches and no cover overlap after 100 ms entry allowance in recorded Cached and Live cycles",
           "the pre-fix recording fails both pixel and window-overlap checks"
         ],
-        "hardwareSlowGestureFeedbackPending": true,
-        "diagnostic": "scripts/check-overview-video.py with scripts/overview-window-probe.swift"
+        "hardwareSlowGestureFeedbackPending": false,
+        "diagnostic": "scripts/check-overview-video.py with scripts/overview-window-probe.swift",
+        "hardwareSlowGestureResult": "User confirmed clean for the requested slow three-finger gesture with pause and reversal"
+      },
+      "refinement043": {
+        "passingChecks": 102,
+        "verified": [
+          "Captured foreground Minecraft canvas at layer 25 is recognized despite normal AppKit hints",
+          "Inactive games, maximized ordinary windows and other-display canvases do not suppress the primary menu bar",
+          "Unchanged suppression state cannot raise the right cover",
+          "Measured native opacity fade cannot publish while still changing",
+          "Genuinely transparent bars and changing Live wallpaper colors remain accepted",
+          "Actual game metadata trace has no Draplet covers during the fullscreen intervals",
+          "Still capture after stopping the diagnostic recording shows the native black menu-bar background"
+        ],
+        "userFinalFullscreenFeedbackPending": true,
+        "diagnosticLimitation": "Region video recording was aborted because its UI dimmed the rest of the desktop; no video validation claimed"
       }
     }
   },

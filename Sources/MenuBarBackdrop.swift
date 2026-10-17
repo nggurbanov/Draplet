@@ -11,6 +11,7 @@ struct NativeBarTreatment {
     let isClear: Bool
     let isOpaque: Bool
     let signature: Data
+    let opacitySignature: Data
     init?(native: CGImage, logicalWidth: CGFloat) {
         let width = native.width, height = native.height
         guard width > 0, height > 0 else { return nil }
@@ -49,9 +50,26 @@ struct NativeBarTreatment {
         let luma = strongest.isEmpty ? 1 : strongest.map(\.1).reduce(0, +) / Double(strongest.count)
         foreground = luma > 0.5 ? .white : .black
         let alphas = stride(from: 3, to: rows.count, by: 4).map { rows[$0] }
+        opacitySignature = Data(alphas)
         isClear = alphas.allSatisfy { $0 <= 1 }
         isOpaque = alphas.allSatisfy { $0 == 255 }
         signature = Data(rows) + Data([luma > 0.5 ? 255 : 0])
+    }
+}
+
+// A complete WindowServer frame can still be part of the native menu bar's
+// fullscreen fade. Confirm its opacity has stopped changing before caching it.
+// Color is deliberately excluded: Live wallpaper colors may keep changing.
+struct NativeBarRecovery {
+    static let confirmationInterval: TimeInterval = 0.1
+    private var opacity: Data?
+    private var stableSince: TimeInterval = 0
+    mutating func accepts(opacity next: Data, at time: TimeInterval) -> Bool {
+        guard opacity == next else {
+            opacity = next; stableSince = time
+            return false
+        }
+        return time - stableSince >= Self.confirmationInterval
     }
 }
 
@@ -132,11 +150,12 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private(set) var screenFrame = NSRect.zero
     private(set) var snapshotCount = 0
     private(set) var frameCount = 0
-    private(set) var overviewSuspended = false
+    private(set) var systemPresentationSuspended = false
     private(set) var presentationSuppressed = false
-    private var awaitingNativeAfterOverview = false
-    private var awaitingDesktopAfterOverview = false
-    private var overviewMonitor: Timer?
+    private var awaitingNativeAfterPresentation = false
+    private var awaitingDesktopAfterPresentation = false
+    private var nativeRecovery = NativeBarRecovery()
+    private var presentationMonitor: Timer?
     var streaming: Bool { stream != nil }
     private var cleanImage: CGImage?
     private var composedImage: CGImage?
@@ -167,15 +186,15 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     var snapshot: CGImage? { composedImage }
 
     func start(mode: BackgroundMode = .cached) {
-        if overviewSuspended { self.mode = mode; return }
+        if systemPresentationSuspended { self.mode = mode; return }
         if active && self.mode == mode { return }
         guard failure == nil, permission else { return }
-        if SystemOverview.current() {
-            suspendForOverview(); watchOverview(); self.mode = mode; return
+        if SystemPresentation.current() {
+            suspendForSystemPresentation(); watchSystemPresentation(); self.mode = mode; return
         }
         if active { stop() }
-        if overviewSuspended { self.mode = mode; return }
-        watchOverview()
+        if systemPresentationSuspended { self.mode = mode; return }
+        watchSystemPresentation()
         self.mode = mode; active = true; generation += 1; let token = generation
         wallpaper = .current(); scene = .current()
         captureQueue.async { [self] in self.singleFrameCapture = false; self.captureNeedsDesktop = true; self.lastFingerprint = nil }
@@ -246,30 +265,31 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         filter.includeMenuBar = false
         return filter
     }
-    private func watchOverview() {
-        guard overviewMonitor == nil else { return }
-        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in _ = self?.checkOverview() }
-        overviewMonitor = timer; RunLoop.main.add(timer, forMode: .common)
+    private func watchSystemPresentation() {
+        guard presentationMonitor == nil else { return }
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in _ = self?.checkSystemPresentation() }
+        presentationMonitor = timer; RunLoop.main.add(timer, forMode: .common)
     }
-    @discardableResult private func checkOverview() -> Bool {
-        guard active || overviewSuspended else { return false }
-        if SystemOverview.current() { suspendForOverview(); return true }
-        if overviewSuspended {
-            overviewSuspended = false
-            awaitingNativeAfterOverview = true; awaitingDesktopAfterOverview = true
+    @discardableResult private func checkSystemPresentation() -> Bool {
+        guard active || systemPresentationSuspended else { return false }
+        if SystemPresentation.current() { suspendForSystemPresentation(); return true }
+        if systemPresentationSuspended {
+            systemPresentationSuspended = false
+            awaitingNativeAfterPresentation = true; awaitingDesktopAfterPresentation = true
+            nativeRecovery = NativeBarRecovery()
             start(mode: mode)
             let token = generation
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                guard let self, token == self.generation, !self.overviewSuspended,
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                guard let self, token == self.generation, !self.systemPresentationSuspended,
                       self.presentationSuppressed else { return }
-                self.fail("The menu-bar background did not recover after Mission Control. Please retry.")
+                self.fail("The menu-bar background did not recover after fullscreen or Mission Control. Please retry.")
             }
         }
         return false
     }
     func checkScene() {
-        guard active || overviewSuspended else { return }
-        if checkOverview() || presentationSuppressed { return }
+        guard active || systemPresentationSuspended else { return }
+        if checkSystemPresentation() || presentationSuppressed { return }
         if mode == .live {
             let ownWindows = Set(NSApp.windows.filter { $0.isVisible && $0.level.rawValue < 24 }.map(\.windowNumber))
             guard !ownWindows.isSubset(of: includedOwnWindows), !filterUpdateInFlight, let capture = stream else { return }
@@ -341,7 +361,11 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
     }
     private func refreshNativeTreatment() {
-        guard active, !nativeInFlight, acceptsCapture(), let nativeWindow else { return }
+        // After a fullscreen/overview transition, first wait for WindowServer
+        // to deliver a complete desktop frame. Capturing the native backing
+        // earlier can return the game's still-transparent bar and freeze it.
+        guard active, !nativeInFlight, !awaitingDesktopAfterPresentation,
+              acceptsCapture(), let nativeWindow else { return }
         nativeInFlight = true; let token = generation
         let filter = SCContentFilter(desktopIndependentWindow: nativeWindow)
         let config = SCStreamConfiguration()
@@ -354,23 +378,31 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 guard let self, token == self.generation, self.active, self.acceptsCapture() else { return }
                 self.nativeInFlight = false
                 if let newTreatment {
-                    let wasAwaiting = self.awaitingNativeAfterOverview
-                    self.awaitingNativeAfterOverview = false
+                    let wasAwaiting = self.awaitingNativeAfterPresentation
+                    if wasAwaiting && !self.nativeRecovery.accepts(opacity: newTreatment.opacitySignature,
+                                                                  at: ProcessInfo.processInfo.systemUptime) {
+                        self.retryNativeTreatment(generation: token)
+                        return
+                    }
+                    self.awaitingNativeAfterPresentation = false
                     guard self.treatment?.signature != newTreatment.signature else {
                         if wasAwaiting { self.publish() }
                         return
                     }
                     self.treatment = newTreatment; self.foreground = newTreatment.foreground
-                    let needsDesktop = !newTreatment.isOpaque || self.awaitingDesktopAfterOverview
+                    let needsDesktop = !newTreatment.isOpaque || self.awaitingDesktopAfterPresentation
                     self.captureQueue.async { [self] in self.captureNeedsDesktop = needsDesktop; self.lastFingerprint = nil }
                     self.publish()
-                } else if self.awaitingNativeAfterOverview {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                        guard let self, token == self.generation, self.active else { return }
-                        self.refreshNativeTreatment()
-                    }
+                } else if self.awaitingNativeAfterPresentation {
+                    self.retryNativeTreatment(generation: token)
                 }
             }
+        }
+    }
+    private func retryNativeTreatment(generation token: Int) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + NativeBarRecovery.confirmationInterval) { [weak self] in
+            guard let self, token == self.generation, self.active, self.awaitingNativeAfterPresentation else { return }
+            self.refreshNativeTreatment()
         }
     }
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
@@ -404,10 +436,11 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 Task { try? await stream.stopCapture() }
             } else { self.frameCount += 1 }
             self.cleanImage = cgImage
-            if self.awaitingDesktopAfterOverview {
-                self.awaitingDesktopAfterOverview = false
+            if self.awaitingDesktopAfterPresentation {
+                self.awaitingDesktopAfterPresentation = false
                 let needsDesktop = !(self.treatment?.isOpaque ?? false)
                 self.captureQueue.async { [self] in self.captureNeedsDesktop = needsDesktop }
+                self.refreshNativeTreatment()
             }
             self.publish()
             if self.refreshAgain { self.refreshAgain = false; self.refreshAppearance() }
@@ -425,7 +458,7 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         NSLog("Draplet background capture: %@", message)
     }
     private func publish() {
-        guard !awaitingNativeAfterOverview, !awaitingDesktopAfterOverview, let treatment else { return }
+        guard !awaitingNativeAfterPresentation, !awaitingDesktopAfterPresentation, let treatment else { return }
         if treatment.isOpaque { composedImage = treatment.image }
         else if treatment.isClear { composedImage = cleanImage }
         else if let cleanImage,
@@ -439,7 +472,7 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
         guard composedImage != nil else { return }
         setReady(true)
-        if presentationSuppressed && !overviewSuspended {
+        if presentationSuppressed && !systemPresentationSuspended {
             presentationSuppressed = false
             NotificationCenter.default.post(name: Self.presentationDidChange, object: nil)
         }
@@ -459,21 +492,19 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         combined.draw(in: bounds, from: source, operation: operation, fraction: 1)
         NSGraphicsContext.restoreGraphicsState()
     }
-    // Mission Control temporarily removes the native bar and renders a different
-    // desktop. Neither image is a valid replacement for the normal bar cache.
-    // Retain the last complete pair while the transient cover windows hide, and
-    // invalidate in-flight callbacks so they cannot publish an overview frame
-    // after the covers reappear during the exit animation.
-    private func suspendForOverview() {
-        guard !overviewSuspended else { return }
+    // Mission Control and fullscreen games replace or cover the native bar.
+    // Retain the last complete pair while our covers are removed, invalidating
+    // in-flight callbacks so neither scene can contaminate the normal cache.
+    private func suspendForSystemPresentation() {
+        guard !systemPresentationSuspended else { return }
         stop(keepingSnapshot: true)
-        overviewSuspended = true
+        systemPresentationSuspended = true
         presentationSuppressed = true
         NotificationCenter.default.post(name: Self.presentationDidChange, object: nil)
     }
     private func acceptsCapture() -> Bool {
-        guard !overviewSuspended else { return false }
-        if SystemOverview.current() { suspendForOverview(); return false }
+        guard !systemPresentationSuspended else { return false }
+        if SystemPresentation.current() { suspendForSystemPresentation(); return false }
         return true
     }
     func stop(keepingSnapshot: Bool = false) {
@@ -484,10 +515,11 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         if let capture { Task { try? await capture.stopCapture() } }
         nativeWindow = nil; desktopFilter = nil; desktopConfig = nil
         if !keepingSnapshot {
-            overviewSuspended = false
+            systemPresentationSuspended = false
             presentationSuppressed = false
-            awaitingNativeAfterOverview = false; awaitingDesktopAfterOverview = false
-            overviewMonitor?.invalidate(); overviewMonitor = nil
+            awaitingNativeAfterPresentation = false; awaitingDesktopAfterPresentation = false
+            nativeRecovery = NativeBarRecovery()
+            presentationMonitor?.invalidate(); presentationMonitor = nil
             cleanImage = nil; composedImage = nil; treatment = nil; setReady(false)
         }
     }

@@ -1,0 +1,42 @@
+{
+  "source": "Minecraft fullscreen app-switch capture on macOS 27, 2026-10-18",
+  "frontPID": 70349,
+  "appKitMenuBarVisible": true,
+  "systemPresentationOptions": 0,
+  "display": {
+    "X": 0,
+    "Y": 0,
+    "Width": 1470,
+    "Height": 956
+  },
+  "windows": [
+    {
+      "alpha": 1,
+      "frame": {
+        "Height": 956,
+        "Width": 1470,
+        "X": 0,
+        "Y": 0
+      },
+      "id": 12807,
+      "layer": 25,
+      "onScreen": true,
+      "owner": "java",
+      "pid": 70349
+    },
+    {
+      "alpha": 1,
+      "frame": {
+        "Height": 33,
+        "Width": 1470,
+        "X": 0,
+        "Y": 0
+      },
+      "id": 6,
+      "layer": 24,
+      "onScreen": true,
+      "owner": "Window Server",
+      "pid": 408
+    }
+  ]
+}

@@ -57,7 +57,7 @@ func overviewWindow(pid: pid_t = 42, layer: Int = 20, frame: CGRect = mainDispla
      kCGWindowBounds as String: frame.dictionaryRepresentation, kCGWindowAlpha as String: alpha]
 }
 func overview(_ windows: [[String: Any]]) -> Bool {
-    SystemOverview.isActive(windows: windows, dockPID: 42, displays: [mainDisplay, secondDisplay])
+    SystemPresentation.isOverview(windows: windows, dockPID: 42, displays: [mainDisplay, secondDisplay])
 }
 check(overview([overviewWindow()]), "A real screen-sized layer-20 Dock canvas suspends background capture")
 check(overview([overviewWindow(layer: 18)]), "The layer-18 overview canvas is also recognized")
@@ -69,6 +69,39 @@ check(!overview([overviewWindow(frame: CGRect(x: 0, y: 880, width: 1470, height:
 check(!overview([overviewWindow(pid: 43), overviewWindow(layer: 24), overviewWindow(alpha: 0)]),
       "Other apps, menu-bar layers and invisible Dock windows cannot impersonate an overview")
 check(!overview([]), "Dismissing the Dock overview allows background capture to resume")
+// Replay the actual game's WindowServer state. Its status-level canvas covers
+// Menubar, although menuBarVisible is true and systemPresentationOptions is 0.
+let gameFixture = try! JSONSerialization.jsonObject(with: Data(contentsOf:
+    URL(fileURLWithPath: "Tests/Fixtures/fullscreen-game.json"))) as! [String: Any]
+let gamePID = gameFixture["frontPID"] as! pid_t
+let gameWindows = (gameFixture["windows"] as! [[String: Any]]).map { row in
+    [kCGWindowOwnerPID as String: row["pid"]!, kCGWindowLayer as String: row["layer"]!,
+     kCGWindowBounds as String: row["frame"]!, kCGWindowAlpha as String: row["alpha"]!,
+     kCGWindowIsOnscreen as String: row["onScreen"]!]
+}
+func suppress(_ windows: [[String: Any]], frontPID: pid_t = gamePID,
+              options: NSApplication.PresentationOptions = []) -> Bool {
+    SystemPresentation.isActive(windows: windows, dockPID: 42, frontPID: frontPID,
+                                displays: [mainDisplay, secondDisplay], menuBarDisplay: mainDisplay, options: options)
+}
+check(gameFixture["appKitMenuBarVisible"] as? Bool == true && gameFixture["systemPresentationOptions"] as? Int == 0 && suppress(gameWindows),
+      "The captured Minecraft canvas suppresses overlays even when both AppKit hints miss the fullscreen game")
+check(!suppress(gameWindows, frontPID: 9309),
+      "An inactive fullscreen game does not suppress Draplet over the foreground desktop app")
+check(!suppress([overviewWindow(pid: gamePID, layer: 0)]),
+      "An ordinary maximized foreground window below Menubar keeps Draplet available")
+check(!suppress([overviewWindow(pid: gamePID, layer: 25, frame: CGRect(x: 824, y: 0, width: 373, height: 32))]),
+      "A notch or menu-bar overlay is not mistaken for a fullscreen game")
+check(!suppress([overviewWindow(pid: gamePID, layer: 25, frame: secondDisplay)]),
+      "A fullscreen window on another display does not suppress the primary display's menu bar")
+var hiddenGame = overviewWindow(pid: gamePID, layer: 25)
+hiddenGame[kCGWindowIsOnscreen as String] = false
+check(!suppress([hiddenGame, overviewWindow(pid: gamePID, layer: 25, alpha: 0)]),
+      "Invisible and offscreen fullscreen windows cannot suppress presentation")
+check(suppress([], options: [.hideDock, .hideMenuBar]) && suppress([], options: [.fullScreen, .autoHideMenuBar]),
+      "Native hidden-menu presentation modes also suppress Draplet without requiring a game canvas")
+check(!suppress([], options: [.fullScreen]),
+      "Native fullscreen with an always-visible menu bar retains Draplet")
 let cover = NSRect(x: 43, y: 923, width: 602.5, height: 33)
 let openArrow = LeftCurtain.indicatorFrame(cover: cover, titleWidth: 100, menuEnd: 377, expanded: true)
 check(openArrow.minX >= cover.minX + 377 && openArrow.maxX <= cover.maxX,
@@ -292,6 +325,26 @@ check(opaqueTreatment.foreground == .white && NativeBarTreatment(native: nativeF
 let transparentTreatment = NativeBarTreatment(native: nativeFixture(light: false, transparent: true), logicalWidth: 200)!
 check(NSBitmapImageRep(cgImage: transparentTreatment.image).colorAt(x: 0, y: 15)!.alphaComponent == 0,
       "A transparent native bar leaves the exact underlying wallpaper visible")
+let transitionalNativeBar = NSBitmapImageRep(data: try! Data(contentsOf:
+    URL(fileURLWithPath: "Tests/Fixtures/transitional-native-bar.png")))!.cgImage!
+let transitionalTreatment = NativeBarTreatment(native: transitionalNativeBar, logicalWidth: 1470)!
+check(transitionalTreatment.isClear,
+      "The captured fullscreen treatment is valid transparency; recovery must distinguish it from the returned desktop")
+var nativeRecovery = NativeBarRecovery()
+// Replay the measured native fullscreen fade. A complete first frame at 167 ms
+// had alpha 30; the bar did not reach 255 until roughly 1.28 seconds.
+let recoveryTrace: [(Double, UInt8)] = [(0.1672, 30), (0.2269, 48), (0.2897, 60), (0.4, 78),
+                                      (0.4949, 107), (0.6246, 141), (0.7165, 170), (0.8885, 213), (1.2777, 255)]
+check(recoveryTrace.allSatisfy { !nativeRecovery.accepts(opacity: Data([$0.1]), at: $0.0) },
+      "No changing frame in the measured fullscreen return fade can be frozen into Cached mode")
+check(!nativeRecovery.accepts(opacity: Data([255]), at: 1.3) && nativeRecovery.accepts(opacity: Data([255]), at: 1.4),
+      "Recovery requires stable native opacity across separate rendered frames, then permits presentation")
+var transparentRecovery = NativeBarRecovery()
+check(!transparentRecovery.accepts(opacity: transitionalTreatment.opacitySignature, at: 0)
+      && transparentRecovery.accepts(opacity: transitionalTreatment.opacitySignature, at: 0.11),
+      "Genuinely transparent native bars remain supported once their opacity settles")
+check(opaqueTreatment.opacitySignature == NativeBarTreatment(native: nativeFixture(light: true), logicalWidth: 200)!.opacitySignature,
+      "Recovery ignores changing background colors and foreground contrast, preserving Live wallpaper support")
 let colorMask = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 100, pixelsHigh: 12, bitsPerSample: 8,
                                 samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
 NSGraphicsContext.saveGraphicsState(); NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: colorMask)
@@ -362,6 +415,13 @@ actualRightCover.prepare(frame: NSRect(x: -4000, y: 0, width: 300, height: 32), 
 check(NSApp.windows.first(where: { $0.contentView is RightMenuCover.View })?.animationBehavior == NSWindow.AnimationBehavior.none,
       "The actual right panel disables AppKit ordering fades that compete with fast curtain reversals")
 let actualRightPanel = NSApp.windows.first(where: { $0.contentView is RightMenuCover.View })!
+// A fullscreen game can be ordered above a still-logically-visible cover.
+// A background refresh repeats the unchanged `false` suppression state; it
+// must not order that cover above the game again.
+actualRightPanel.orderOut(nil)
+actualRightCover.setPresentationSuppressed(false)
+check(!actualRightPanel.isVisible,
+      "Repeating the current presentation state does not raise a retained cover over another app")
 actualRightCover.setPresentationSuppressed(true)
 check(actualRightCover.isVisible && !actualRightPanel.isVisible,
       "The right transition retains its logical cover while its real window is absent from Mission Control")

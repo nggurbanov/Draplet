@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var pulse: Timer?
     var observers: [NSObjectProtocol] = []
     var appearanceObserver: NSKeyValueObservation?
+    var presentationObserver: NSKeyValueObservation?
     var hotkey: EventHotKeyRef?
     var eventHandler: EventHandlerRef?
     var wasAuthorized = false
@@ -56,7 +57,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         })
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in self?.refreshDisplays() })
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in self?.refreshDisplays() })
-        observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in self?.left.syncVisibility(); MenuBarBackdrop.shared.refreshAppearance() })
+        observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            MenuBarBackdrop.shared.checkScene()
+            self?.left.syncVisibility()
+            MenuBarBackdrop.shared.refreshAppearance()
+        })
+        presentationObserver = NSApp.observe(\.currentSystemPresentationOptions, options: [.new]) { _, _ in
+            DispatchQueue.main.async { MenuBarBackdrop.shared.checkScene() }
+        }
         appearanceObserver = NSApp.observe(\.effectiveAppearance, options: [.new]) { _, _ in
             DispatchQueue.main.async { MenuBarBackdrop.shared.refreshAppearance() }
         }
@@ -178,7 +186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) { cleanup() }
     func cleanup() {
         guard !terminating else { return }; terminating = true
-        appearanceObserver = nil
+        appearanceObserver = nil; presentationObserver = nil
         pulse?.invalidate(); left.stop(); right?.stop(); MenuBarBackdrop.shared.stop()
         if let hotkey { UnregisterEventHotKey(hotkey) }
         if let eventHandler { RemoveEventHandler(eventHandler) }
@@ -205,7 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             "backgroundMode": self.prefs.backgroundMode.rawValue, "streaming": MenuBarBackdrop.shared.streaming,
                             "backgroundSnapshots": MenuBarBackdrop.shared.snapshotCount, "backgroundFrames": MenuBarBackdrop.shared.frameCount,
                             "backgroundReady": MenuBarBackdrop.shared.ready, "backgroundPermission": MenuBarBackdrop.shared.permission,
-                            "overviewSuspended": MenuBarBackdrop.shared.overviewSuspended,
+                            "systemPresentationSuspended": MenuBarBackdrop.shared.systemPresentationSuspended,
                             "presentationSuppressed": MenuBarBackdrop.shared.presentationSuppressed,
                             "rightAnimation": self.right.animationStatus,
                             "hitWindow": self.left.clickPanel?.windowNumber ?? 0,

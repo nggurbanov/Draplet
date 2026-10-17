@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pixel regression for a 1470-point menu-bar recording with a black native bar.
 
-Record with: screencapture -v -V 24 -R0,0,1470,80 clip.mov
+Analyze an existing recording; recording UI can alter the desktop appearance.
 This fixture checks transition contamination, not general wallpaper matching.
 Requires ffmpeg; it does not change macOS appearance or drive the UI.
 """

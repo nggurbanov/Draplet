@@ -128,6 +128,7 @@ final class RightMenuCover: TransitionCover {
         panel.contentView?.needsDisplay = true
     }
     func setPresentationSuppressed(_ suppressed: Bool) {
+        guard presentationSuppressed != suppressed else { return }
         presentationSuppressed = suppressed
         if suppressed { panel?.orderOut(nil) }
         else if wantsVisible { panel?.orderFrontRegardless(); panel?.displayIfNeeded() }
