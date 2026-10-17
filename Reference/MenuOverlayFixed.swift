@@ -1,0 +1,340 @@
+import AppKit
+import ApplicationServices
+
+// Keep one fixed cover ordered throughout app switches. Only its label changes.
+let app = NSApplication.shared
+app.setActivationPolicy(.accessory)
+let arguments = CommandLine.arguments
+let duration = min(600.0, max(15.0, Double(arguments.dropFirst().first ?? "180") ?? 180))
+let evidence = URL(fileURLWithPath: arguments.count > 2 ? arguments[2] : NSTemporaryDirectory())
+let started = Date()
+let coverLevel = NSWindow.Level.statusBar // Menu bar 24 < cover 25 < Vorssaint 26.
+var panel: NSPanel?
+var coverFrame = CGRect.zero
+var currentPID: pid_t = 0
+var currentApp = ""
+var revealed = false
+var paused = false
+var lastInside = Date.distantPast
+var lastMenuCheck = Date.distantPast
+var menuIsTracking = false
+var enteredAt: Date?
+let accessibilityQueue = DispatchQueue(label: "local.menu-overlay.accessibility", qos: .userInitiated)
+var queryInFlight = false
+var menuBoundsCache: [pid_t: (CGFloat, CGFloat)] = [:]
+var animationStart = 0.0
+var animationFrom = 0.0
+var animationTarget = 0.0
+var animationDuration = 0.18
+var animationRunning = false
+var manualUntil = Date.distantPast
+var timer: Timer?
+var activationObserver: NSObjectProtocol?
+
+func frameJSON(_ r: CGRect) -> [String: Double] {
+    ["x": r.minX, "y": r.minY, "width": r.width, "height": r.height]
+}
+
+func emit(_ event: String, _ extras: [String: Any] = [:]) {
+    var value = extras
+    value["event"] = event
+    value["elapsed"] = Date().timeIntervalSince(started)
+    value["frontApp"] = NSWorkspace.shared.frontmostApplication?.localizedName ?? ""
+    value["frontPid"] = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
+    let line = try! JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) + Data([10])
+    FileHandle.standardOutput.write(line)
+    let log = evidence.appendingPathComponent("events.jsonl")
+    if !FileManager.default.fileExists(atPath: log.path) { FileManager.default.createFile(atPath: log.path, contents: nil) }
+    if let handle = try? FileHandle(forWritingTo: log) {
+        handle.seekToEndOfFile()
+        handle.write(line)
+        try? handle.close()
+    }
+}
+
+final class CoverView: NSView {
+    var applicationName = "" { didSet { needsDisplay = true } }
+    var menuStart: CGFloat = 120 { didSet { needsDisplay = true } }
+    var menuEnd: CGFloat = 420 { didSet { needsDisplay = true } }
+    var progress = 0.0 { didSet { needsDisplay = true } }
+    let font = NSFontManager.shared.convert(NSFont.menuBarFont(ofSize: 0), toHaveTrait: .boldFontMask)
+    override var isOpaque: Bool { false }
+
+    func estimatedMenuStart() -> CGFloat {
+        min(bounds.width, (applicationName as NSString).size(withAttributes: [.font: font]).width + 22)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.clear.setFill()
+        bounds.fill(using: .copy)
+        NSColor.black.setFill()
+        // The title never swaps with the native title. Only command menus are uncovered.
+        NSRect(x: 0, y: 0, width: menuStart, height: bounds.height).fill()
+        if progress <= 0 {
+            bounds.fill()
+        } else if progress < 1 {
+            let feather: CGFloat = 14
+            let edge = menuStart + (max(menuStart, menuEnd) - menuStart + feather) * progress
+            let gradientStart = max(menuStart, edge - feather)
+            NSGradient(starting: .clear, ending: .black)?.draw(
+                in: NSRect(x: gradientStart, y: 0, width: max(0.01, edge - gradientStart), height: bounds.height), angle: 0)
+            NSColor.black.setFill()
+            NSRect(x: min(edge, bounds.width), y: 0, width: max(0, bounds.width - edge), height: bounds.height).fill()
+        }
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font, .foregroundColor: NSColor.white, .paragraphStyle: paragraph
+        ]
+        let name = applicationName as NSString
+        let size = name.size(withAttributes: attributes)
+        let width = min(size.width, bounds.width - 45)
+        // Native menu titles sit on this pixel-aligned baseline at 2× scale.
+        name.draw(in: NSRect(x: 10.5, y: (bounds.height - size.height) / 2 + 1,
+                             width: width + 1, height: size.height), withAttributes: attributes)
+        let x = width + 24.5
+        let mid = bounds.midY
+        let chevron = NSBezierPath()
+        chevron.move(to: NSPoint(x: x, y: mid - 3))
+        chevron.line(to: NSPoint(x: x + 3, y: mid))
+        chevron.line(to: NSPoint(x: x, y: mid + 3))
+        chevron.lineWidth = 1.4
+        NSColor(white: 0.55, alpha: max(0, 1 - progress * 5)).setStroke()
+        chevron.stroke()
+    }
+}
+
+final class CoverPanel: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
+func menuBar(_ pid: pid_t) -> AXUIElement? {
+    guard AXIsProcessTrusted() else { return nil }
+    let element = AXUIElementCreateApplication(pid)
+    AXUIElementSetMessagingTimeout(element, 0.1)
+    var menu: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(element, kAXMenuBarAttribute as CFString, &menu) == .success,
+          let menu else { return nil }
+    let bar = menu as! AXUIElement
+    AXUIElementSetMessagingTimeout(bar, 0.04)
+    return bar
+}
+
+func appleMenuFrame(_ pid: pid_t) -> CGRect? {
+    guard let bar = menuBar(pid) else { return nil }
+    var children: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(bar, kAXChildrenAttribute as CFString, &children) == .success,
+          let nodes = children as? [AXUIElement], let apple = nodes.first else { return nil }
+    var position: CFTypeRef?
+    var size: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(apple, kAXPositionAttribute as CFString, &position) == .success,
+          AXUIElementCopyAttributeValue(apple, kAXSizeAttribute as CFString, &size) == .success,
+          let position, let size else { return nil }
+    var point = CGPoint.zero
+    var extent = CGSize.zero
+    AXValueGetValue(position as! AXValue, .cgPoint, &point)
+    AXValueGetValue(size as! AXValue, .cgSize, &extent)
+    guard extent.width > 0, extent.height > 0 else { return nil }
+    return CGRect(origin: point, size: extent)
+}
+
+func menuState(_ pid: pid_t) -> (Bool, CGFloat?, CGFloat?) {
+    guard let bar = menuBar(pid) else { return (false, nil, nil) }
+    var tracking = false
+    var selected: CFTypeRef?
+    if AXUIElementCopyAttributeValue(bar, kAXSelectedChildrenAttribute as CFString, &selected) == .success,
+       let children = selected as? [AXUIElement], !children.isEmpty { tracking = true }
+    var all: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(bar, kAXChildrenAttribute as CFString, &all) == .success,
+          let children = all as? [AXUIElement] else { return (tracking, nil, nil) }
+    var first: CGFloat?
+    var end: CGFloat?
+    for (index, child) in children.prefix(32).enumerated() {
+        AXUIElementSetMessagingTimeout(child, 0.04)
+        var active: CFTypeRef?
+        if AXUIElementCopyAttributeValue(child, kAXSelectedAttribute as CFString, &active) == .success,
+           active as? Bool == true { tracking = true }
+        if index >= 2 {
+            var position: CFTypeRef?
+            var size: CFTypeRef?
+            if AXUIElementCopyAttributeValue(child, kAXPositionAttribute as CFString, &position) == .success,
+               AXUIElementCopyAttributeValue(child, kAXSizeAttribute as CFString, &size) == .success,
+               let position, let size {
+                var point = CGPoint.zero
+                var extent = CGSize.zero
+                AXValueGetValue(position as! AXValue, .cgPoint, &point)
+                AXValueGetValue(size as! AXValue, .cgSize, &extent)
+                if extent.width > 0 {
+                    first = min(first ?? point.x, point.x)
+                    end = max(end ?? point.x + extent.width, point.x + extent.width)
+                }
+            }
+        }
+    }
+    return (tracking, first, end)
+}
+
+func setReveal(_ open: Bool, _ reason: String, animated: Bool = true) {
+    guard let view = panel?.contentView as? CoverView else { return }
+    let target = open ? 1.0 : 0.0
+    if revealed == open && (animated || view.progress == target) { return }
+    revealed = open
+    animationFrom = view.progress
+    animationTarget = target
+    animationStart = ProcessInfo.processInfo.systemUptime
+    animationDuration = open ? 0.18 : 0.16
+    animationRunning = animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion && abs(target - view.progress) > 0.001
+    if !animationRunning { view.progress = target }
+    emit(open ? "revealing" : "covering", ["reason": reason, "animated": animationRunning,
+         "from": animationFrom, "windowNumber": panel?.windowNumber ?? 0])
+}
+
+func animate() {
+    guard animationRunning, let view = panel?.contentView as? CoverView else { return }
+    let t = min(1, (ProcessInfo.processInfo.systemUptime - animationStart) / animationDuration)
+    let eased = animationTarget > animationFrom ? 1 - pow(1 - t, 3) : t * t * (3 - 2 * t)
+    view.progress = animationFrom + (animationTarget - animationFrom) * eased
+    if t >= 1 {
+        animationRunning = false
+        emit(revealed ? "revealed" : "covered", ["transitionSeconds": ProcessInfo.processInfo.systemUptime - animationStart,
+             "panelVisible": panel?.isVisible ?? false, "windowNumber": panel?.windowNumber ?? 0])
+    }
+}
+
+func updateTitle() {
+    guard let front = NSWorkspace.shared.frontmostApplication,
+          front.processIdentifier != ProcessInfo.processInfo.processIdentifier,
+          front.processIdentifier != currentPID else { return }
+    let wasVisible = panel?.isVisible ?? false
+    currentPID = front.processIdentifier
+    currentApp = front.localizedName ?? "Application"
+    if let view = panel?.contentView as? CoverView {
+        view.applicationName = currentApp
+        let cached = menuBoundsCache[currentPID]
+        view.menuStart = cached?.0 ?? view.estimatedMenuStart()
+        view.menuEnd = cached?.1 ?? min(coverFrame.width, view.menuStart + 320)
+    }
+    menuIsTracking = false
+    lastMenuCheck = .distantPast
+    if coverFrame.insetBy(dx: -3, dy: -3).contains(NSEvent.mouseLocation) {
+        lastInside = Date()
+        setReveal(true, "pointer-in-menu")
+    } else if !paused {
+        lastInside = .distantPast
+        setReveal(false, "app-switch", animated: false)
+    }
+    panel?.displayIfNeeded()
+    emit("title", ["title": currentApp, "fixedFrame": frameJSON(coverFrame),
+                   "visibleBefore": wasVisible, "visibleAfter": panel?.isVisible ?? false,
+                   "windowNumber": panel?.windowNumber ?? 0])
+}
+
+func tick() {
+    updateTitle()
+    guard !paused else { return }
+    let now = Date()
+    if !queryInFlight && now.timeIntervalSince(lastMenuCheck) > 0.15 {
+        lastMenuCheck = now
+        queryInFlight = true
+        let pid = currentPID
+        accessibilityQueue.async {
+            let state = menuState(pid)
+            DispatchQueue.main.async {
+                queryInFlight = false
+                guard pid == currentPID else { return }
+                menuIsTracking = state.0
+                if let start = state.1, let end = state.2, let view = panel?.contentView as? CoverView {
+                    let bounds = (max(0, start - coverFrame.minX), min(coverFrame.width, end - coverFrame.minX + 8))
+                    if menuBoundsCache[pid]?.0 != bounds.0 || menuBoundsCache[pid]?.1 != bounds.1 {
+                        menuBoundsCache[pid] = bounds
+                        view.menuStart = bounds.0
+                        view.menuEnd = bounds.1
+                        emit("menu-bounds", ["start": bounds.0, "end": bounds.1, "targetPid": pid])
+                    }
+                }
+            }
+        }
+    }
+    if now < manualUntil { animate(); return }
+    let tolerance: CGFloat = revealed ? 9 : 3
+    let inside = coverFrame.insetBy(dx: -tolerance, dy: -tolerance).contains(NSEvent.mouseLocation)
+    if inside {
+        if enteredAt == nil { enteredAt = now }
+        lastInside = now
+        if now.timeIntervalSince(enteredAt!) >= 0.045 || NSEvent.pressedMouseButtons != 0 {
+            setReveal(true, "pointer-in-menu")
+        }
+    } else {
+        enteredAt = nil
+        if menuIsTracking { lastInside = now; setReveal(true, "menu-open") }
+        else if now.timeIntervalSince(lastInside) > 0.32 { setReveal(false, "pointer-left") }
+    }
+    animate()
+}
+
+func quit() {
+    timer?.invalidate()
+    if let activationObserver { NSWorkspace.shared.notificationCenter.removeObserver(activationObserver) }
+    panel?.orderOut(nil)
+    panel?.close()
+    panel = nil
+    emit("cleanup", ["remainingPanels": 0])
+    app.terminate(nil)
+}
+
+Thread.detachNewThread {
+    while let line = readLine() {
+        let command = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        DispatchQueue.main.async {
+            switch command {
+            case "quit": quit()
+            case "pause": paused = true; panel?.orderOut(nil)
+            case "resume": paused = false; lastInside = .distantPast; panel?.orderFrontRegardless()
+            case "reveal": manualUntil = Date().addingTimeInterval(2); setReveal(true, "manual-probe")
+            case "collapse": manualUntil = Date().addingTimeInterval(2); setReveal(false, "manual-probe")
+            case "status": emit("status", ["revealed": revealed, "paused": paused,
+                                            "fixedFrame": frameJSON(coverFrame), "title": currentApp,
+                                            "level": coverLevel.rawValue,
+                                            "panelVisible": panel?.isVisible ?? false,
+                                            "progress": (panel?.contentView as? CoverView)?.progress ?? 0,
+                                            "windowNumber": panel?.windowNumber ?? 0])
+            default: break
+            }
+        }
+    }
+}
+
+DispatchQueue.main.asyncAfter(deadline: .now() + duration) { quit() }
+DispatchQueue.main.async {
+    guard let screen = NSScreen.screens.first else { quit(); return }
+    let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
+    let apple = appleMenuFrame(pid)
+    let height = apple?.height ?? max(NSStatusBar.system.thickness, screen.safeAreaInsets.top)
+    let left = (apple?.maxX ?? screen.frame.minX + 44) - 1
+    let right = screen.auxiliaryTopLeftArea?.maxX ?? screen.frame.minX + screen.frame.width / 2
+    coverFrame = NSRect(x: left, y: screen.frame.maxY - height, width: right - left, height: height)
+    let cover = CoverPanel(contentRect: coverFrame, styleMask: [.borderless, .nonactivatingPanel],
+                            backing: .buffered, defer: false)
+    cover.isReleasedWhenClosed = false
+    cover.level = coverLevel
+    cover.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+    cover.backgroundColor = .clear
+    cover.isOpaque = false
+    cover.hasShadow = false
+    cover.hidesOnDeactivate = false
+    cover.ignoresMouseEvents = true
+    cover.contentView = CoverView(frame: NSRect(origin: .zero, size: coverFrame.size))
+    panel = cover
+    emit("ready", ["pid": ProcessInfo.processInfo.processIdentifier, "mode": "fixed-cover",
+                   "accessibilityTrusted": AXIsProcessTrusted(), "duration": duration,
+                   "fixedFrame": frameJSON(coverFrame), "level": coverLevel.rawValue])
+    updateTitle()
+    cover.orderFrontRegardless()
+    timer = Timer(timeInterval: 1.0 / 60, repeats: true) { _ in tick() }
+    RunLoop.main.add(timer!, forMode: .common)
+    activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+        forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+    ) { _ in updateTitle() }
+}
+app.run()
