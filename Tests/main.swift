@@ -331,4 +331,30 @@ transitions.collapse(style: .hiddenBar, pace: .originalLeft, frame: cover) { _ i
 check(!visualCover.isVisible && visualEngine.state == .calibrating, "Hidden Bar bypasses every custom visual cover")
 visualEngine.finish(.collapsed); runScheduled(0)
 check(completed == 3, "Native Hidden Bar completes without a custom settling delay")
+let actualRightCover = RightMenuCover()
+actualRightCover.prepare(frame: NSRect(x: -4000, y: 0, width: 300, height: 32), progress: 0, style: .curtain)
+check(NSApp.windows.first(where: { $0.contentView is RightMenuCover.View })?.animationBehavior == NSWindow.AnimationBehavior.none,
+      "The actual right panel disables AppKit ordering fades that compete with fast curtain reversals")
+actualRightCover.stop()
+// A native assertion callback is not a WindowServer presentation fence. Reversing
+// an expansion can finish the assertion while the previous native show is still
+// queued. The fully closed cover must outlive that late presentation.
+transitions.expand(style: .curtain, pace: .originalLeft, frame: cover) {}
+runScheduled(RightMenuTransition.revealPreparation); visualCover.finish()
+transitions.collapse(style: .curtain, pace: .originalLeft, frame: cover) { _ in }
+visualCover.finish(); visualEngine.finish(.collapsed)
+runScheduled(RightMenuTransition.hideSettling)
+check(!transitions.expanded && visualCover.isVisible && visualCover.progress == 0,
+      "A closed curtain keeps late native show/hide frames covered after the assertion completes")
+transitions.expand(style: .curtain, pace: .originalLeft, frame: cover) {}
+check(visualCover.isVisible && visualCover.progress == 0,
+      "Reopening reuses the opaque closed cover before releasing native hiding")
+runScheduled(RightMenuTransition.revealPreparation); visualCover.finish()
+check(!visualCover.isVisible && transitions.expanded,
+      "The retained curtain is removed after a completed reveal")
+transitions.collapse(style: .curtain, pace: .originalLeft, frame: cover) { _ in }
+visualCover.finish(); visualEngine.finish(.collapsed); runScheduled(RightMenuTransition.hideSettling)
+transitions.cancelAndExpand()
+check(!visualCover.isVisible && visualEngine.state == .expanded,
+      "Pausing or reconfiguring still removes a retained closed curtain and releases native hiding")
 print("Passed \(assertions) lifecycle, preference, rendering, and animation checks")

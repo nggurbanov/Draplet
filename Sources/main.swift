@@ -206,6 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             "arrowFrame": self.left.frameJSON(self.right.toggleItem.button?.window?.frame ?? .zero)]
                         let data = try! JSONSerialization.data(withJSONObject: status, options: .sortedKeys)
                         print(String(data: data, encoding: .utf8)!, terminator: "\n"); fflush(stdout)
+                    case "right-click": self.right.toggleItem.button?.performClick(nil)
                     case "expand": self.right.expand()
                     case "collapse": self.right.collapse()
                     case "reveal": self.revealBoth()

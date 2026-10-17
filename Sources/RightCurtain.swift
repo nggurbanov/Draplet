@@ -129,6 +129,7 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
     }
     func refreshBackground() { cover.refreshBackground() }
     func collapse(completion: ((CollapseResult) -> Void)? = nil) {
+        collapseTimer?.invalidate()
         guard canManage, engine.isArrangementValid else { completion?(.unavailable); return }
         if prefs.alwaysHidden && !engine.isAlwaysHiddenSeparatorPlaced {
             prefs.error = "⌘-drag the dotted separator to the left of Draplet’s arrow first."
@@ -187,6 +188,7 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
     }
     func tick() {
         if !NSMenu.menuBarVisible(), cover.isVisible { transition.cancelAndExpand(); updatePresentation() }
+        if !transition.expanded { cover.updateClosedFrame(animationFrame) }
         guard canManage, prefs.trigger(for: .right) == .hover, engine.state == .collapsed else { cancelHover(); return }
         guard let frame = toggleItem.button?.window?.frame,
               frame.insetBy(dx: -3, dy: -3).contains(NSEvent.mouseLocation) else { cancelHover(); return }

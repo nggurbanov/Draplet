@@ -91,6 +91,9 @@ final class RightMenuCover: TransitionCover {
             window.isReleasedWhenClosed = false; window.level = .statusBar
             window.backgroundColor = .clear; window.isOpaque = false
             window.hasShadow = false; window.ignoresMouseEvents = true; window.hidesOnDeactivate = false
+            // AppKit's implicit order-in/out fade can overlap our mask animation
+            // when this panel is reused by a quick second click.
+            window.animationBehavior = .none
             window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
             window.contentView = View(frame: NSRect(origin: .zero, size: frame.size))
             panel = window
@@ -115,6 +118,11 @@ final class RightMenuCover: TransitionCover {
     }
     func cancelAnimation() { timer?.invalidate(); timer = nil }
     func refreshBackground() { panel?.contentView?.needsDisplay = true }
+    func updateClosedFrame(_ frame: NSRect?) {
+        guard progress == 0, let frame, let panel, panel.isVisible, panel.frame != frame else { return }
+        panel.setFrame(frame, display: false)
+        panel.contentView?.needsDisplay = true
+    }
     func dismiss() { cancelAnimation(); panel?.orderOut(nil) }
     func stop() { dismiss(); panel?.close(); panel = nil }
 }
@@ -165,7 +173,10 @@ final class RightMenuTransition {
                 if result == .collapsed {
                     self.schedule(style == .hiddenBar ? 0 : Self.hideSettling) { [weak self] in
                         guard let self, token == self.generation else { return }
-                        self.cover.dismiss(); completion(result)
+                        // The assertion has been accepted, not necessarily presented. Keep
+                        // the closed cover across native animation tails and fast reversals;
+                        // expand removes it only after our reveal is complete.
+                        completion(result)
                     }
                 } else {
                     self.expanded = true; self.cover.dismiss(); completion(result)

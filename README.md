@@ -121,7 +121,10 @@ icon, own/system controls, stale inventory cancellation, late native assertion
 invalidation, successful release, and fail-open activation errors. It also checks
 persisted styles/timing/background mode, wallpaper-file replacement invalidation,
 mirrored Curtain/Fade bitmap output, native-treatment extraction and contrast, and
-right-transition reversal/timeout handling. Live checks cover actual native
+right-transition reversal/timeout handling, retained closed covers, and disabling
+implicit window fades. A rapid 24-click frame recording reproduced late native
+icon flashes before the fix and found none with retained covers and window
+animations disabled. Live checks cover actual native
 hiding/reveal, A/B durations, cached one-shot versus streaming behavior, blue and
 opaque backgrounds, keyboard shortcuts and clean exit. Animation timers run at
 60 fps only during transitions; Live background capture is separately optional.
