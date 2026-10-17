@@ -124,6 +124,7 @@ struct BackdropScene: Equatable {
 final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
     static let shared = MenuBarBackdrop()
     static let didChange = Notification.Name("Draplet.MenuBarBackdropChanged")
+    static let presentationDidChange = Notification.Name("Draplet.MenuBarPresentationChanged")
     private(set) var ready = false
     private(set) var failure: String?
     private(set) var mode = BackgroundMode.cached
@@ -131,6 +132,11 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private(set) var screenFrame = NSRect.zero
     private(set) var snapshotCount = 0
     private(set) var frameCount = 0
+    private(set) var overviewSuspended = false
+    private(set) var presentationSuppressed = false
+    private var awaitingNativeAfterOverview = false
+    private var awaitingDesktopAfterOverview = false
+    private var overviewMonitor: Timer?
     var streaming: Bool { stream != nil }
     private var cleanImage: CGImage?
     private var composedImage: CGImage?
@@ -161,9 +167,15 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     var snapshot: CGImage? { composedImage }
 
     func start(mode: BackgroundMode = .cached) {
+        if overviewSuspended { self.mode = mode; return }
         if active && self.mode == mode { return }
         guard failure == nil, permission else { return }
+        if SystemOverview.current() {
+            suspendForOverview(); watchOverview(); self.mode = mode; return
+        }
         if active { stop() }
+        if overviewSuspended { self.mode = mode; return }
+        watchOverview()
         self.mode = mode; active = true; generation += 1; let token = generation
         wallpaper = .current(); scene = .current()
         captureQueue.async { [self] in self.singleFrameCapture = false; self.captureNeedsDesktop = true; self.lastFingerprint = nil }
@@ -171,7 +183,7 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             guard let self else { return }
             do {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-                guard token == self.generation, self.active else { return }
+                guard token == self.generation, self.active, self.acceptsCapture() else { return }
                 guard let screen = NSScreen.screens.first,
                       let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) else {
                     self.fail("The primary display is unavailable."); return
@@ -194,6 +206,7 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 config.pixelFormat = kCVPixelFormatType_32BGRA
                 self.desktopConfig = config
                 self.refreshNativeTreatment()
+                guard token == self.generation, self.active else { return }
                 if mode == .live {
                     let capture = SCStream(filter: filter, configuration: config, delegate: self)
                     try capture.addStreamOutput(self, type: .screen, sampleHandlerQueue: self.captureQueue)
@@ -233,8 +246,30 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         filter.includeMenuBar = false
         return filter
     }
+    private func watchOverview() {
+        guard overviewMonitor == nil else { return }
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in _ = self?.checkOverview() }
+        overviewMonitor = timer; RunLoop.main.add(timer, forMode: .common)
+    }
+    @discardableResult private func checkOverview() -> Bool {
+        guard active || overviewSuspended else { return false }
+        if SystemOverview.current() { suspendForOverview(); return true }
+        if overviewSuspended {
+            overviewSuspended = false
+            awaitingNativeAfterOverview = true; awaitingDesktopAfterOverview = true
+            start(mode: mode)
+            let token = generation
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                guard let self, token == self.generation, !self.overviewSuspended,
+                      self.presentationSuppressed else { return }
+                self.fail("The menu-bar background did not recover after Mission Control. Please retry.")
+            }
+        }
+        return false
+    }
     func checkScene() {
-        guard active else { return }
+        guard active || overviewSuspended else { return }
+        if checkOverview() || presentationSuppressed { return }
         if mode == .live {
             let ownWindows = Set(NSApp.windows.filter { $0.isVisible && $0.level.rawValue < 24 }.map(\.windowNumber))
             guard !ownWindows.isSubset(of: includedOwnWindows), !filterUpdateInFlight, let capture = stream else { return }
@@ -272,7 +307,7 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
     }
     private func captureDesktop() {
-        guard active, let config = desktopConfig else { return }
+        guard active, acceptsCapture(), let config = desktopConfig else { return }
         if desktopInFlight { refreshAgain = true; return }
         desktopInFlight = true; let token = generation
         // SCScreenshotManager flattens this strip without the native lower-edge
@@ -282,7 +317,7 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             guard let self, token == self.generation, self.active else { return }
             do {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-                guard token == self.generation, self.active,
+                guard token == self.generation, self.active, self.acceptsCapture(),
                       let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) else { return }
                 let filter = self.makeDesktopFilter(content: content, display: display)
                 self.desktopFilter = filter
@@ -296,7 +331,7 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 try await capture.startCapture()
                 guard token == self.generation else { try? await capture.stopCapture(); return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self, weak capture] in
-                    guard let self, let capture, self.stream === capture, self.desktopInFlight else { return }
+                    guard let self, let capture, token == self.generation, self.stream === capture, self.desktopInFlight else { return }
                     self.fail("The menu-bar background did not deliver a complete frame. Please retry.")
                 }
             } catch {
@@ -306,7 +341,7 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
     }
     private func refreshNativeTreatment() {
-        guard active, !nativeInFlight, let nativeWindow else { return }
+        guard active, !nativeInFlight, acceptsCapture(), let nativeWindow else { return }
         nativeInFlight = true; let token = generation
         let filter = SCContentFilter(desktopIndependentWindow: nativeWindow)
         let config = SCStreamConfiguration()
@@ -316,13 +351,24 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) { [weak self] image, _ in
             let newTreatment = image.flatMap { NativeBarTreatment(native: $0, logicalWidth: nativeWindow.frame.width) }
             DispatchQueue.main.async {
-                guard let self, token == self.generation, self.active else { return }
+                guard let self, token == self.generation, self.active, self.acceptsCapture() else { return }
                 self.nativeInFlight = false
                 if let newTreatment {
-                    guard self.treatment?.signature != newTreatment.signature else { return }
+                    let wasAwaiting = self.awaitingNativeAfterOverview
+                    self.awaitingNativeAfterOverview = false
+                    guard self.treatment?.signature != newTreatment.signature else {
+                        if wasAwaiting { self.publish() }
+                        return
+                    }
                     self.treatment = newTreatment; self.foreground = newTreatment.foreground
-                    self.captureQueue.async { [self] in self.captureNeedsDesktop = !newTreatment.isOpaque; self.lastFingerprint = nil }
+                    let needsDesktop = !newTreatment.isOpaque || self.awaitingDesktopAfterOverview
+                    self.captureQueue.async { [self] in self.captureNeedsDesktop = needsDesktop; self.lastFingerprint = nil }
                     self.publish()
+                } else if self.awaitingNativeAfterOverview {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                        guard let self, token == self.generation, self.active else { return }
+                        self.refreshNativeTreatment()
+                    }
                 }
             }
         }
@@ -349,7 +395,7 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         let image = CIImage(cvPixelBuffer: buffer)
         guard let cgImage = imageContext.createCGImage(image, from: image.extent) else { return }
         DispatchQueue.main.async { [weak self, weak stream] in
-            guard let self, let stream, self.stream === stream, self.active else { return }
+            guard let self, let stream, self.stream === stream, self.active, self.acceptsCapture() else { return }
             if self.mode == .cached {
                 guard self.desktopInFlight else { return }
                 self.desktopInFlight = false; self.snapshotCount += 1
@@ -357,7 +403,13 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 self.captureQueue.async { [self] in self.singleFrameCapture = false }
                 Task { try? await stream.stopCapture() }
             } else { self.frameCount += 1 }
-            self.cleanImage = cgImage; self.publish()
+            self.cleanImage = cgImage
+            if self.awaitingDesktopAfterOverview {
+                self.awaitingDesktopAfterOverview = false
+                let needsDesktop = !(self.treatment?.isOpaque ?? false)
+                self.captureQueue.async { [self] in self.captureNeedsDesktop = needsDesktop }
+            }
+            self.publish()
             if self.refreshAgain { self.refreshAgain = false; self.refreshAppearance() }
         }
     }
@@ -373,7 +425,7 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         NSLog("Draplet background capture: %@", message)
     }
     private func publish() {
-        guard let treatment else { return }
+        guard !awaitingNativeAfterOverview, !awaitingDesktopAfterOverview, let treatment else { return }
         if treatment.isOpaque { composedImage = treatment.image }
         else if treatment.isClear { composedImage = cleanImage }
         else if let cleanImage,
@@ -387,6 +439,10 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
         guard composedImage != nil else { return }
         setReady(true)
+        if presentationSuppressed && !overviewSuspended {
+            presentationSuppressed = false
+            NotificationCenter.default.post(name: Self.presentationDidChange, object: nil)
+        }
         NotificationCenter.default.post(name: Self.didChange, object: nil)
     }
     private func setReady(_ value: Bool) {
@@ -403,14 +459,37 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         combined.draw(in: bounds, from: source, operation: operation, fraction: 1)
         NSGraphicsContext.restoreGraphicsState()
     }
-    func stop() {
+    // Mission Control temporarily removes the native bar and renders a different
+    // desktop. Neither image is a valid replacement for the normal bar cache.
+    // Retain the last complete pair while the transient cover windows hide, and
+    // invalidate in-flight callbacks so they cannot publish an overview frame
+    // after the covers reappear during the exit animation.
+    private func suspendForOverview() {
+        guard !overviewSuspended else { return }
+        stop(keepingSnapshot: true)
+        overviewSuspended = true
+        presentationSuppressed = true
+        NotificationCenter.default.post(name: Self.presentationDidChange, object: nil)
+    }
+    private func acceptsCapture() -> Bool {
+        guard !overviewSuspended else { return false }
+        if SystemOverview.current() { suspendForOverview(); return false }
+        return true
+    }
+    func stop(keepingSnapshot: Bool = false) {
         generation += 1; active = false; nativeInFlight = false; desktopInFlight = false; refreshAgain = false; filterUpdateInFlight = false
         pendingRefresh?.cancel(); pendingRefresh = nil
         monitor?.invalidate(); monitor = nil; nativeRefresh?.invalidate(); nativeRefresh = nil
         let capture = stream; stream = nil
         if let capture { Task { try? await capture.stopCapture() } }
-        cleanImage = nil; composedImage = nil; treatment = nil; nativeWindow = nil
-        desktopFilter = nil; desktopConfig = nil; setReady(false)
+        nativeWindow = nil; desktopFilter = nil; desktopConfig = nil
+        if !keepingSnapshot {
+            overviewSuspended = false
+            presentationSuppressed = false
+            awaitingNativeAfterOverview = false; awaitingDesktopAfterOverview = false
+            overviewMonitor?.invalidate(); overviewMonitor = nil
+            cleanImage = nil; composedImage = nil; treatment = nil; setReady(false)
+        }
     }
     func restart() { let selectedMode = mode; failure = nil; stop(); start(mode: selectedMode) }
     func requestPermission() {

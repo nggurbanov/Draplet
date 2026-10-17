@@ -1,7 +1,7 @@
 # Draplet
 
 Your menu bar, on demand. A small, free, open-source macOS utility for both sides
-of the menu bar. MIT licensed. Personal daily-use build, 0.4.1.
+of the menu bar. MIT licensed. Personal daily-use build, 0.4.2.
 
 ## Use
 
@@ -30,7 +30,8 @@ of the menu bar. MIT licensed. Personal daily-use build, 0.4.1.
 - Launch at login is opt-in. Reopen `/Applications/Draplet.app` for Settings.
 - Draplet appears in the Dock while Settings is open, including when minimized.
   Closing Settings returns it to menu-bar-only operation.
-- Overlay windows use AppKit's transient behavior to hide during Mission Control.
+- Draplet removes its overlay windows during Mission Control, including the
+  transition, and restores them after the native bar and a fresh background return.
 - Quit releases the icon-hiding assertion and removes every cover/status item.
 
 Accessibility is required for reading menu geometry. Grant it through Settings;
@@ -61,10 +62,17 @@ Settings → Appearance → Menu-bar background offers:
   and file metadata. App activation and window changes near the bar also refresh
   it, since those windows contribute shadows. Space/display/wake and appearance
   events refresh it too; the previous image stays visible until its replacement
-  is ready. No stream runs while the scene is unchanged.
+  is ready. No stream runs while the scene is unchanged. Mission Control frames
+  are excluded from the cache.
 - **Live**: stream the same strip at up to 30 fps for animated wallpapers. Unchanged
   frames are skipped. This uses more energy; choose it for motion providers that
-  keep the same wallpaper URL. Refresh Background is also available manually.
+  keep the same wallpaper URL. Capture pauses during Mission Control. Refresh
+  Background is also available manually.
+
+During Mission Control, macOS owns the native bar: Draplet's title, arrow and
+right cover stay out of the transition. On return, a fresh native treatment and
+desktop frame must both arrive before the covers return. If the left menus were
+collapsed, they close with the selected animation after the native bar returns.
 
 The native menu-bar window supplies opacity, vertical shading and foreground
 contrast without copying its menu glyphs. This also handles Reduce Transparency.
@@ -117,7 +125,7 @@ bash scripts/build-dmg.sh
 ```
 
 The packaging script creates `.build/packaging-venv` and installs pinned dmgbuild
-1.6.7 there if needed. It writes `dist/Draplet-0.4.1.dmg`, verifies the image, mounts
+1.6.7 there if needed. It writes `dist/Draplet-0.4.2.dmg`, verifies the image, mounts
 it temporarily and verifies the packaged app signature, executable and Applications
 shortcut. The approved background is `Resources/Installer/background.tiff`, at 2x
 resolution. Finder opens an 800×500 icon view with actual draggable file targets.
@@ -149,7 +157,7 @@ notarization and automatic updates are outside this build.
 
 ## Validation
 
-`test.sh` checks LTR/RTL section resolution, protecting the most-visible sibling
+`test.sh` runs 88 checks covering LTR/RTL section resolution, protecting the most-visible sibling
 icon, own/system controls, stale inventory cancellation, late native assertion
 invalidation, successful release, and fail-open activation errors. It also checks
 persisted styles/timing/background mode, wallpaper-file replacement invalidation,
@@ -161,6 +169,24 @@ animations disabled. Live checks cover actual native
 hiding/reveal, A/B durations, cached one-shot versus streaming behavior, blue and
 opaque backgrounds, keyboard shortcuts and clean exit. Animation timers run at
 60 fps only during transitions; Live background capture is separately optional.
+
+Mission Control regression checks include actual window suppression and protection
+against visibility polling or native transition callbacks bringing a cover back.
+Recorded Cached and Live entry/exit cycles have zero background mismatches and no
+cover overlap after a 100 ms entry allowance. The original recording fails both
+checks. The pixel fixture is specific to a 1470-point display with a black native
+bar; the matching WindowServer trace checks overlay absence while that bar fades.
+Slow trackpad pauses and reversals still require a hardware check.
+
+To replay this diagnostic, record the bar and metadata concurrently while entering
+and leaving Mission Control, then run the checker (requires ffmpeg):
+
+```sh
+swift scripts/overview-window-probe.swift 24 > /tmp/draplet-windows.log &
+screencapture -x -v -V 24 -R0,0,1470,80 /tmp/draplet-overview.mov
+wait
+python3 scripts/check-overview-video.py /tmp/draplet-overview.mov --window-log /tmp/draplet-windows.log
+```
 
 `Reference/` preserves the exact approved prototype and its timed launcher.
 See [ThirdPartyNotices.md](ThirdPartyNotices.md) for Hidden Bar attribution.

@@ -50,6 +50,25 @@ final class Visibility: NativeVisibilityProviding {
 }
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
+let mainDisplay = CGRect(x: 0, y: 0, width: 1470, height: 956)
+let secondDisplay = CGRect(x: -1920, y: -124, width: 1920, height: 1080)
+func overviewWindow(pid: pid_t = 42, layer: Int = 20, frame: CGRect = mainDisplay, alpha: Double = 1) -> [String: Any] {
+    [kCGWindowOwnerPID as String: pid, kCGWindowLayer as String: layer,
+     kCGWindowBounds as String: frame.dictionaryRepresentation, kCGWindowAlpha as String: alpha]
+}
+func overview(_ windows: [[String: Any]]) -> Bool {
+    SystemOverview.isActive(windows: windows, dockPID: 42, displays: [mainDisplay, secondDisplay])
+}
+check(overview([overviewWindow()]), "A real screen-sized layer-20 Dock canvas suspends background capture")
+check(overview([overviewWindow(layer: 18)]), "The layer-18 overview canvas is also recognized")
+check(overview([overviewWindow(frame: secondDisplay)]), "Overview detection handles a display with negative global coordinates")
+check(!overview([overviewWindow(frame: CGRect(x: 16, y: 300, width: 110, height: 140))]),
+      "Stage Manager thumbnails do not suspend background matching")
+check(!overview([overviewWindow(frame: CGRect(x: 0, y: 880, width: 1470, height: 76))]),
+      "The ordinary Dock does not suspend background matching")
+check(!overview([overviewWindow(pid: 43), overviewWindow(layer: 24), overviewWindow(alpha: 0)]),
+      "Other apps, menu-bar layers and invisible Dock windows cannot impersonate an overview")
+check(!overview([]), "Dismissing the Dock overview allows background capture to resume")
 let cover = NSRect(x: 43, y: 923, width: 602.5, height: 33)
 let openArrow = LeftCurtain.indicatorFrame(cover: cover, titleWidth: 100, menuEnd: 377, expanded: true)
 check(openArrow.minX >= cover.minX + 377 && openArrow.maxX <= cover.maxX,
@@ -105,6 +124,13 @@ if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
     curtain.updateClickTarget()
     check(curtain.clickPanel!.frame.minX == expandedX,
           "Fade keeps its opaque toggle clear of partially visible native headings")
+    curtain.setPresentationSuppressed(true)
+    curtain.syncVisibility(); curtain.updateClickTarget(); curtain.tick()
+    check(!testPanel.isVisible && curtain.clickPanel?.isVisible == false,
+          "Mission Control explicitly removes both left windows; visibility polling cannot bring them back")
+    curtain.setPresentationSuppressed(false)
+    check(testPanel.isVisible && curtain.clickPanel?.isVisible == true,
+          "Restoring the desktop returns both left windows after presentation is allowed")
     curtain.stop()
 }
 let items = Items(), reader = Inventory(), bridge = Visibility()
@@ -335,6 +361,17 @@ let actualRightCover = RightMenuCover()
 actualRightCover.prepare(frame: NSRect(x: -4000, y: 0, width: 300, height: 32), progress: 0, style: .curtain)
 check(NSApp.windows.first(where: { $0.contentView is RightMenuCover.View })?.animationBehavior == NSWindow.AnimationBehavior.none,
       "The actual right panel disables AppKit ordering fades that compete with fast curtain reversals")
+let actualRightPanel = NSApp.windows.first(where: { $0.contentView is RightMenuCover.View })!
+actualRightCover.setPresentationSuppressed(true)
+check(actualRightCover.isVisible && !actualRightPanel.isVisible,
+      "The right transition retains its logical cover while its real window is absent from Mission Control")
+actualRightCover.prepare(frame: NSRect(x: -4000, y: 0, width: 300, height: 32), progress: 0, style: .curtain)
+check(!actualRightPanel.isVisible, "A pending native transition cannot order a suppressed right cover back in")
+actualRightCover.setPresentationSuppressed(false)
+check(actualRightPanel.isVisible, "The retained right cover returns only after desktop presentation resumes")
+actualRightCover.setPresentationSuppressed(true); actualRightCover.dismiss(); actualRightCover.setPresentationSuppressed(false)
+check(!actualRightCover.isVisible && !actualRightPanel.isVisible,
+      "A cover dismissed during Mission Control is not resurrected on exit")
 actualRightCover.stop()
 // A native assertion callback is not a WindowServer presentation fence. Reversing
 // an expansion can finish the assertion while the previous native show is still

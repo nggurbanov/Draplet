@@ -43,6 +43,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.prefs.backgroundReady = MenuBarBackdrop.shared.ready; self.applyPreferences()
             }
             self.left.refreshBackground(); self.right.refreshBackground()
+            self.left.setPresentationSuppressed(MenuBarBackdrop.shared.presentationSuppressed)
+            self.right.setPresentationSuppressed(MenuBarBackdrop.shared.presentationSuppressed)
+        })
+        observers.append(NotificationCenter.default.addObserver(forName: MenuBarBackdrop.presentationDidChange, object: nil, queue: .main) { [weak self] _ in
+            self?.left.setPresentationSuppressed(MenuBarBackdrop.shared.presentationSuppressed)
+            self?.right.setPresentationSuppressed(MenuBarBackdrop.shared.presentationSuppressed)
         })
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { _ in MenuBarBackdrop.shared.checkScene() })
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { _ in
@@ -199,6 +205,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             "backgroundMode": self.prefs.backgroundMode.rawValue, "streaming": MenuBarBackdrop.shared.streaming,
                             "backgroundSnapshots": MenuBarBackdrop.shared.snapshotCount, "backgroundFrames": MenuBarBackdrop.shared.frameCount,
                             "backgroundReady": MenuBarBackdrop.shared.ready, "backgroundPermission": MenuBarBackdrop.shared.permission,
+                            "overviewSuspended": MenuBarBackdrop.shared.overviewSuspended,
+                            "presentationSuppressed": MenuBarBackdrop.shared.presentationSuppressed,
                             "rightAnimation": self.right.animationStatus,
                             "hitWindow": self.left.clickPanel?.windowNumber ?? 0,
                             "hitVisible": self.left.clickPanel?.isVisible ?? false,

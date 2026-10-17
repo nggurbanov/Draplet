@@ -82,10 +82,13 @@ final class RightMenuCover: TransitionCover {
     }
     private var panel: LeftCurtain.CoverPanel?
     private var timer: Timer?
-    var isVisible: Bool { panel?.isVisible ?? false }
+    private var wantsVisible = false
+    private var presentationSuppressed = false
+    var isVisible: Bool { wantsVisible }
     var progress: Double { (panel?.contentView as? View)?.progress ?? 1 }
     func prepare(frame: NSRect, progress: Double, style: BarAnimation) {
         cancelAnimation()
+        wantsVisible = true
         if panel == nil {
             let window = LeftCurtain.CoverPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false; window.level = .statusBar
@@ -100,7 +103,8 @@ final class RightMenuCover: TransitionCover {
         }
         panel?.setFrame(frame, display: false)
         if let view = panel?.contentView as? View { view.progress = progress; view.style = style }
-        panel?.orderFrontRegardless(); panel?.displayIfNeeded()
+        if !presentationSuppressed { panel?.orderFrontRegardless() }
+        panel?.displayIfNeeded()
     }
     func animate(to target: Double, duration: Double, completion: @escaping () -> Void) {
         cancelAnimation()
@@ -119,11 +123,16 @@ final class RightMenuCover: TransitionCover {
     func cancelAnimation() { timer?.invalidate(); timer = nil }
     func refreshBackground() { panel?.contentView?.needsDisplay = true }
     func updateClosedFrame(_ frame: NSRect?) {
-        guard progress == 0, let frame, let panel, panel.isVisible, panel.frame != frame else { return }
+        guard progress == 0, let frame, let panel, wantsVisible, panel.frame != frame else { return }
         panel.setFrame(frame, display: false)
         panel.contentView?.needsDisplay = true
     }
-    func dismiss() { cancelAnimation(); panel?.orderOut(nil) }
+    func setPresentationSuppressed(_ suppressed: Bool) {
+        presentationSuppressed = suppressed
+        if suppressed { panel?.orderOut(nil) }
+        else if wantsVisible { panel?.orderFrontRegardless(); panel?.displayIfNeeded() }
+    }
+    func dismiss() { wantsVisible = false; cancelAnimation(); panel?.orderOut(nil) }
     func stop() { dismiss(); panel?.close(); panel = nil }
 }
 

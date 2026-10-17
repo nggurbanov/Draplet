@@ -155,6 +155,8 @@ The icon and drag-to-Applications installer retain approved variant E. Final nat
 
 **0.4.1 refinement verification:** 75 checks pass, including the real Settings window's open, minimize, close and reopen Dock lifecycle. Native UI checks confirmed the top inset in both appearances, navigation through a tab's blank corner, icon artwork and selection, and the explanatory paused notice. A Mission Control capture plus WindowServer inventory confirmed that all three overlay windows leave the screen during the overview and return afterward. Full-width reveal still brings Draplet's short menu forward with Settings closed, without adding a Dock icon. The local DMG's mounted app signature, executable and Applications shortcut were verified again.
 
+**0.4.2 transition refinement:** Slow-gesture screenshots exposed intermediate frames that the fully open 0.4.1 overview check missed. All three overlay windows are now explicitly removed for the Dock overview's lifetime; AppKit's transient fading alone is insufficient. Background capture pauses, rejects stale callbacks and retains the last good image. Presentation resumes only after a fresh native treatment and desktop frame arrive, then the left menus close with the selected animation if previously collapsed. There are 88 passing checks, including real window-ordering checks. Recorded Cached and Live cycles show zero black-bar background mismatches and zero cover overlap after the 100 ms entry allowance; the pre-fix recording fails both diagnostics. Slow trackpad pauses and reversals remain a separate hardware verification, pending user feedback.
+
 ## Do's and Don'ts
 
 ### Do:

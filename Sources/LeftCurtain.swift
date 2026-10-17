@@ -31,6 +31,7 @@ var activationObserver: NSObjectProtocol?
 var animationTimer: Timer?
 var mouseMonitor: Any?
 var enabled = false
+var presentationSuppressed = false
 var clickPanel: CoverPanel?
 var manuallyCollapsed = false
 var onSettings: (() -> Void)?
@@ -230,7 +231,7 @@ func updateTitle() {
 }
 
 func tick() {
-    guard enabled else { return }
+    guard enabled, !presentationSuppressed else { return }
     syncVisibility()
     guard panel?.isVisible == true else { return }
     updateTitle()
@@ -244,7 +245,7 @@ func tick() {
             let state = menuState(pid)
             DispatchQueue.main.async { [self] in
                 queryInFlight = false
-                guard pid == currentPID else { return }
+                guard pid == currentPID, !presentationSuppressed else { return }
                 menuIsTracking = state.0
                 if let start = state.1, let end = state.2, let view = panel?.contentView as? CoverView {
                     let bounds = (max(0, start - coverFrame.minX), min(coverFrame.width, end - coverFrame.minX + 8))
@@ -279,10 +280,30 @@ func tick() {
 
 func syncVisibility() {
     guard enabled, let panel else { return }
+    guard !presentationSuppressed else { panel.orderOut(nil); clickPanel?.orderOut(nil); return }
     if NSMenu.menuBarVisible() {
         if !panel.isVisible { panel.orderFrontRegardless() }
     } else if panel.isVisible { panel.orderOut(nil) }
     updateClickTarget()
+}
+
+func setPresentationSuppressed(_ suppressed: Bool) {
+    guard presentationSuppressed != suppressed else { return }
+    presentationSuppressed = suppressed
+    guard enabled else { return }
+    if suppressed {
+        animationRunning = false; animationTimer?.invalidate(); animationTimer = nil
+        menuIsTracking = false
+        panel?.orderOut(nil); clickPanel?.orderOut(nil)
+    } else if let view = panel?.contentView as? CoverView {
+        updateTitle()
+        let open = revealed || (prefs.trigger(for: .left) == .hover && coverFrame.contains(NSEvent.mouseLocation))
+        // The real bar has already returned. Restore its title/arrow at full
+        // opacity, then close the command menus with Draplet's normal animation.
+        view.progress = 1; revealed = true
+        syncVisibility()
+        if !open { setReveal(false, "overview-ended") }
+    }
 }
 
 func stop() {
@@ -316,6 +337,7 @@ func start() {
                             backing: .buffered, defer: false)
     cover.isReleasedWhenClosed = false
     cover.level = coverLevel
+    cover.animationBehavior = .none
     // Floating covers must disappear with the real menu bar in Mission Control.
     // Stationary windows instead remain pasted over the desktop and Spaces strip.
     cover.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
@@ -329,12 +351,13 @@ func start() {
     cover.contentView = view
     panel = cover
     enabled = true
+    presentationSuppressed = MenuBarBackdrop.shared.presentationSuppressed
     currentPID = 0
     emit("ready", ["pid": ProcessInfo.processInfo.processIdentifier, "mode": "fixed-cover",
                    "accessibilityTrusted": AXIsProcessTrusted(),
                    "fixedFrame": frameJSON(coverFrame), "level": coverLevel.rawValue])
     updateTitle()
-    cover.orderFrontRegardless()
+    if !presentationSuppressed { cover.orderFrontRegardless() }
     refreshPreferences()
     timer = Timer(timeInterval: 1.0 / 20, repeats: true) { [weak self] _ in self?.tick() }
     RunLoop.main.add(timer!, forMode: .common)
@@ -383,7 +406,7 @@ static func indicatorFrame(cover: NSRect, titleWidth: CGFloat, menuEnd: CGFloat,
 }
 
 func updateClickTarget() {
-    guard enabled, panel?.isVisible == true,
+    guard enabled, !presentationSuppressed, panel?.isVisible == true,
           let view = panel?.contentView as? CoverView else { clickPanel?.orderOut(nil); return }
     let width = min((view.applicationName as NSString).size(withAttributes: [.font: view.font]).width, coverFrame.width - 45)
     let closedFrame = Self.indicatorFrame(cover: coverFrame, titleWidth: width, menuEnd: view.menuEnd, expanded: false)
@@ -405,6 +428,7 @@ func updateClickTarget() {
     if clickPanel == nil {
         let hit = CoverPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         hit.level = coverLevel
+        hit.animationBehavior = .none
         hit.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
         // macOS hit-tests transparent panels through to the native File menu.
         // Paint the exact background crop into the opaque click target so it

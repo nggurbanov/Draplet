@@ -192,6 +192,19 @@
           "mounted DMG app signature, executable and Applications shortcut"
         ],
         "screenshot": ".impeccable/review/mission-control-041.png"
+      },
+      "refinement042": {
+        "passingChecks": 88,
+        "verified": [
+          "explicit removal of left title, hit target and right cover throughout recorded Dock overview cycles",
+          "visibility polling and native transition callbacks cannot restore suppressed windows",
+          "Cached and Live captures stop during the overview and recover afterward",
+          "fresh native treatment and desktop frame required before restoring covers",
+          "zero black-bar mismatches and no cover overlap after 100 ms entry allowance in recorded Cached and Live cycles",
+          "the pre-fix recording fails both pixel and window-overlap checks"
+        ],
+        "hardwareSlowGestureFeedbackPending": true,
+        "diagnostic": "scripts/check-overview-video.py with scripts/overview-window-probe.swift"
       }
     }
   },

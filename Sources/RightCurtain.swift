@@ -44,6 +44,7 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
         configure()
     }
     func configure() {
+        cover.setPresentationSuppressed(MenuBarBackdrop.shared.presentationSuppressed)
         updateHoverMonitor()
         let next = "\(canManage)-\(prefs.alwaysHidden)-\(prefs.autoCollapse)-\(prefs.collapseDelay)-\(prefs.fullWidth)-\(MenuBarBackdrop.shared.ready)"
         guard next != configuration else { updatePresentation(); return }
@@ -128,6 +129,10 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
          "coverVisible": cover.isVisible, "progress": cover.progress]
     }
     func refreshBackground() { cover.refreshBackground() }
+    func setPresentationSuppressed(_ suppressed: Bool) {
+        cover.setPresentationSuppressed(suppressed)
+        if suppressed { cancelHover() }
+    }
     func collapse(completion: ((CollapseResult) -> Void)? = nil) {
         collapseTimer?.invalidate()
         guard canManage, engine.isArrangementValid else { completion?(.unavailable); return }
@@ -189,6 +194,7 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
         }
     }
     func tick() {
+        guard !MenuBarBackdrop.shared.presentationSuppressed else { cancelHover(); return }
         if !NSMenu.menuBarVisible(), cover.isVisible { transition.cancelAndExpand(); updatePresentation() }
         if !transition.expanded { cover.updateClosedFrame(animationFrame) }
         guard canManage, prefs.trigger(for: .right) == .hover, engine.state == .collapsed else { cancelHover(); return }
