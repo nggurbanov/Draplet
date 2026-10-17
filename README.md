@@ -1,7 +1,7 @@
 # Draplet
 
 Your menu bar, on demand. A small, free, open-source macOS utility for both sides
-of the menu bar. MIT licensed. Personal daily-use build, 0.3.0.
+of the menu bar. MIT licensed. Personal daily-use build, 0.4.0.
 
 ## Use
 
@@ -9,12 +9,12 @@ of the menu bar. MIT licensed. Personal daily-use build, 0.3.0.
   native application menus. The title stays in place.
 - Right: click the arrow to hide or reveal status icons. Right-click for Settings,
   Pause/Resume, Reveal Both Sides, and Quit.
-- Both sides default to Hover. Settings → Reveal offers a shared Hover/Click
+- Both sides default to Hover. Settings → General offers a shared Hover/Click
   selector or independent choices. Clicking also works in Hover mode. The left
   arrow stays visible and toggles both ways; while open it sits after the last
   menu (or before the Apple glyph if the menus fill the space up to the notch),
   leaving File and the other native menus clickable.
-- Settings → Icons offers matching Chevron, Arrow, Triangle, Hidden Bar, Dots,
+- Settings → Appearance offers matching Chevron, Arrow, Triangle, Hidden Bar, Dots,
   or custom artwork, with optional separate choices. Directional presets mirror
   toward/away from the center; custom artwork keeps its orientation. Hidden Bar
   uses its original arrows as homage. Custom PNG/JPEG/TIFF/PDF files (up to 8 MB)
@@ -39,17 +39,17 @@ Monitoring permission, account, subscription or network access is needed.
 
 ## Animations and background
 
-Settings → Animations defaults to mirrored Curtain reveals, opening inward toward
+Settings → Appearance → Animations defaults to mirrored Curtain reveals, opening inward toward
 the notch. Fade is available for both sides. Unlink the sides to choose separately;
 Hidden Bar is available only on the right and preserves its native movement/timing.
-A shared timing control offers A (180 ms reveal / 160 ms hide, the original left
-pace) and B (550 ms / 250 ms, based on measured native right-side motion). Preview
+A shared timing control offers Quick (180 ms reveal / 160 ms hide, the original
+left pace) and Relaxed (550 ms / 250 ms, based on measured native right-side motion). Preview
 Both Sides demonstrates the selection. The right side prepares native icon layout
 behind its cover before revealing, and settles the hidden layout behind the cover
 after closing. Reversing a transition cancels stale callbacks; failures release the
 cover and reveal the icons. Reduce Motion disables the custom transition.
 
-Settings → Menu-bar background offers:
+Settings → Appearance → Menu-bar background offers:
 
 - **Cached** (default): freeze one complete frame from the same rendering stream
   as Live, then stop capturing. This retains native shading that macOS's still
@@ -89,7 +89,33 @@ The output is `.build/Draplet.app`. The build script uses an available Apple
 Development signing identity, or ad-hoc signing if none exists. To choose one,
 set `DRAPLET_SIGNING_IDENTITY` to its identity hash. Keep the same identity and
 bundle identifier across installed builds so permissions stay associated.
-The icon source is `scripts/make-icon.swift`; the generated ICNS is checked in.
+The approved E artwork is retained in `Resources/Brand/IconSource.png`. Its clean
+production-alpha export is `Resources/Brand/Draplet.png`; `scripts/make-icon.swift`
+resamples that export into a standard iconset. The generated ICNS is checked in.
+`prepare-icon.py` is optional asset tooling (Pillow/numpy/scipy); it preserves the
+original interior RGB and derives the actual tile contour for its alpha mask.
+
+## Native Settings and local installer
+
+The resizable native Settings window has General, Appearance, Left, Right and
+Shortcuts tabs. Shared visual choices live in Appearance; General links reveal
+behavior, and Left/Right expose independent actions when unlinked. Changes apply
+immediately. Pause/Resume and Reveal Both Sides stay available across tabs.
+Appearance follows macOS automatically, with warm light/dark surfaces and contrast
+checked against real native renders. The small preview is explicitly illustrative;
+Preview Both Sides exercises the real menu bar.
+
+```sh
+bash scripts/build-dmg.sh
+```
+
+The packaging script creates `.build/packaging-venv` and installs pinned dmgbuild
+1.6.7 there if needed. It writes `dist/Draplet-0.4.0.dmg`, verifies the image, mounts
+it temporarily and verifies the packaged app signature, executable and Applications
+shortcut. The approved background is `Resources/Installer/background.tiff`, at 2x
+resolution. Finder opens an 800×500 icon view with actual draggable file targets.
+The installer is local and signed with the app's existing identity; public release,
+notarization and automatic updates are outside this build.
 
 ## Current scope and limits
 

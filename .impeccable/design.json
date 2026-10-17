@@ -1,0 +1,211 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-17T10:35:49+00:00",
+  "title": "Design System: Draplet",
+  "extensions": {
+    "platform": "macos",
+    "surface": "native-settings",
+    "mode": "operate",
+    "source": "Sources/Settings.swift",
+    "authority": "Approved variant E artwork; Settings concepts are style references; exact layout delegated to Impeccable. No composition/state-fidelity contract.",
+    "colorMeta": {
+      "accent-light": {
+        "role": "primary",
+        "displayName": "Terracotta text accent, light"
+      },
+      "accent-dark": {
+        "role": "primary",
+        "displayName": "Terracotta text accent, dark"
+      },
+      "control-tint": {
+        "role": "primary",
+        "displayName": "Deep terracotta filled control"
+      },
+      "secondary-light": {
+        "role": "neutral",
+        "displayName": "Warm secondary label, light"
+      },
+      "secondary-dark": {
+        "role": "neutral",
+        "displayName": "Warm secondary label, dark"
+      },
+      "background-light": {
+        "role": "neutral",
+        "displayName": "Warm ivory background"
+      },
+      "background-dark": {
+        "role": "neutral",
+        "displayName": "Charcoal background"
+      },
+      "surface-light": {
+        "role": "neutral",
+        "displayName": "Inset ivory surface"
+      },
+      "surface-dark": {
+        "role": "neutral",
+        "displayName": "Inset charcoal surface"
+      }
+    },
+    "appearanceMapping": {
+      "accent": {
+        "light": "{colors.accent-light}",
+        "dark": "{colors.accent-dark}"
+      },
+      "secondary": {
+        "light": "{colors.secondary-light}",
+        "dark": "{colors.secondary-dark}"
+      },
+      "background": {
+        "light": "{colors.background-light}",
+        "dark": "{colors.background-dark}"
+      },
+      "surface": {
+        "light": "{colors.surface-light}",
+        "dark": "{colors.surface-dark}"
+      }
+    },
+    "filledControlTint": "{colors.control-tint}",
+    "nativeRendering": {
+      "primaryText": "Native primary label color",
+      "groupBorder": "Native primary at 0.09 opacity, 1pt",
+      "previewBorder": "Native primary at 0.12 opacity, 1pt",
+      "selectedNavigationSurface": "Adaptive accent at 0.12 opacity",
+      "toolbar": "Unified NSToolbar; isBordered=false after custom view assignment explicitly disables native item glass backgrounds; selected tab keeps only its custom accent surface",
+      "controlStates": "Native focus, hover and disabled appearance",
+      "customShadows": false
+    },
+    "window": {
+      "initialContentSizePt": [
+        940,
+        710
+      ],
+      "minimumWindowSizePt": [
+        850,
+        700
+      ],
+      "minimumSwiftUIContentSizePt": [
+        830,
+        620
+      ],
+      "resizable": true,
+      "frameAutosaveName": "Draplet.Settings",
+      "scrollStrategy": "Vertical ScrollView for page content; footer remains outside scrolling content"
+    },
+    "navigation": {
+      "tabs": [
+        "General",
+        "Appearance",
+        "Left",
+        "Right",
+        "Shortcuts"
+      ],
+      "initialTab": "Appearance",
+      "tabWidthsPt": {
+        "Appearance": 92,
+        "other": 68
+      },
+      "pauseResume": "Toolbar",
+      "revealBothSides": "Persistent footer"
+    },
+    "nativeComponents": [
+      {
+        "name": "Native action button",
+        "kind": "button",
+        "implementation": "SwiftUI Button; adaptive accent; native focus/hover/disabled states"
+      },
+      {
+        "name": "Selected toolbar tab",
+        "kind": "nav",
+        "refersTo": "toolbar-tab",
+        "implementation": "Plain SwiftUI Button with selected accessibility trait; adaptive accent text and 12% accent rounded background"
+      },
+      {
+        "name": "Settings group",
+        "kind": "card",
+        "refersTo": "settings-group-light",
+        "implementation": "SettingsGroup uses adaptive surface and 1pt primary-opacity border; no custom shadow"
+      },
+      {
+        "name": "Segmented choice",
+        "kind": "input",
+        "implementation": "SwiftUI segmented Picker tinted with SettingsPalette.controlTint"
+      },
+      {
+        "name": "Same/independent switch",
+        "kind": "input",
+        "implementation": "Native regular switch reveals shared row or independent left/right rows"
+      },
+      {
+        "name": "Menu-bar preview",
+        "kind": "custom",
+        "refersTo": "menu-bar-preview",
+        "implementation": "Labeled sample Finder/9:41 menu bar; arrows change preview only; Preview Both Sides invokes actual utility"
+      }
+    ],
+    "motion": [
+      {
+        "name": "Quick",
+        "value": "180ms reveal / 160ms hide",
+        "purpose": "Retained original-left pace; preserve current preference."
+      },
+      {
+        "name": "Relaxed",
+        "value": "550ms reveal / 250ms hide",
+        "purpose": "Retained original-right pace; preserve current preference."
+      }
+    ],
+    "review": {
+      "disposition": "SHIP",
+      "screenshots": [
+        ".impeccable/review/appearance-dark-final.png",
+        ".impeccable/review/appearance-light-final.png",
+        ".impeccable/review/installer.png"
+      ],
+      "contrast": {
+        "selectedNavigationDark": 6.91,
+        "selectedNavigationLight": 7.62,
+        "secondaryMinimum": 5.43
+      },
+      "recordedPassingChecks": 69,
+      "manualValidation": [
+        "linked/independent settings",
+        "custom icon import/removal",
+        "auto-hide slider",
+        "Pause/Resume"
+      ],
+      "htmlCssDetector": "Not run: native SwiftUI/AppKit",
+      "scope": "Reviewed local Settings, icon and installer; no public release, paid signing or notarization claim"
+    }
+  },
+  "components": [],
+  "narrative": {
+    "northStar": "A quiet daily macOS utility",
+    "overview": "Warm ivory and charcoal surfaces carry compact, familiar controls. The approved variant E artwork owns the brand: an asymmetric terracotta curtain, two ivory rings on a chocolate rail and three exposed chocolate dots. Its texture belongs in the icon and installer artwork; Settings use native AppKit chrome and SwiftUI controls.\n\nThe approved PNGs under `../art/draplet-e` establish palette and character. The user explicitly loosened exact layout fidelity and delegated effective native UI/UX to Impeccable. They are style references for Settings, not a composition or state-fidelity contract.",
+    "keyCharacteristics": [
+      "Warm, restrained and compact.",
+      "Native controls and standard macOS window behavior.",
+      "Clear shared choices with independent controls when needed.",
+      "Immediate settings changes with visible permission recovery."
+    ],
+    "rules": [
+      {
+        "name": "The Two Terracottas Rule",
+        "body": "Text/switch accent and filled-control tint serve different contrast needs. Do not replace the darker segmented-control fill with the brighter dark-mode text accent.",
+        "section": "colors"
+      }
+    ],
+    "dos": [
+      "Do use the final appearance-specific text and secondary colors from the frontmatter.",
+      "Do use the darker control tint for filled segmented controls in both appearances.",
+      "Do retain native keyboard focus, accessibility semantics and control states.",
+      "Do let the window resize and longer pages scroll while keeping the footer available.",
+      "Do distinguish illustrative preview interactions from real menu-bar actions."
+    ],
+    "donts": [
+      "Don't treat the approved Settings concepts as an exact layout contract.",
+      "Don't add duplicate toolbar backgrounds around the custom navigation views.",
+      "Don't place artwork textures or decorative dashboard chrome in Settings forms.",
+      "Don't change the native hiding engines, menu-bar window behavior or timing constants as part of visual polish."
+    ]
+  }
+}

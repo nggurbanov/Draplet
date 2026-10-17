@@ -211,6 +211,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     case "collapse": self.right.collapse()
                     case "reveal": self.revealBoth()
                     case "settings": self.settings.show()
+                    case "appearance-light": self.settings.window?.appearance = NSAppearance(named: .aqua)
+                    case "appearance-dark": self.settings.window?.appearance = NSAppearance(named: .darkAqua)
+                    case "appearance-system": self.settings.window?.appearance = nil
                     case "left-toggle": self.left.indicatorClicked()
                     case "preview": self.previewAnimations()
                     case "pace-a": self.prefs.animationPace = .originalLeft
