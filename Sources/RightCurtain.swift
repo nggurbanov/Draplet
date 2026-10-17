@@ -119,7 +119,7 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
         guard NSMenu.menuBarVisible(), let arrow = toggleItem.button?.window?.frame,
               let screen = NSScreen.screens.first(where: { $0.frame.intersects(arrow) }) else { return nil }
         let start = screen.auxiliaryTopRightArea?.minX ?? screen.frame.midX
-        let height = max(NSStatusBar.system.thickness, screen.safeAreaInsets.top) + 1
+        let height = max(NSStatusBar.system.thickness, screen.safeAreaInsets.top)
         guard arrow.minX > start else { return nil }
         return NSRect(x: start, y: screen.frame.maxY - height, width: arrow.minX - start, height: height)
     }

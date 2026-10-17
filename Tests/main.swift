@@ -150,6 +150,18 @@ check(replacedWallpaper != WallpaperFingerprint(url: wallpaperFixture, options: 
 check(replacedWallpaper == WallpaperFingerprint(url: wallpaperFixture, options: "fill", storeURL: nil),
       "An unchanged wallpaper stays cached")
 try FileManager.default.removeItem(at: wallpaperFixture)
+let sceneBand = CGRect(x: 0, y: 0, width: 1470, height: 32)
+let nearWindow = BackdropScene.Window(number: 1, layer: 0, frame: CGRect(x: 0, y: 32, width: 900, height: 600))
+let farWindow = BackdropScene.Window(number: 2, layer: 0, frame: CGRect(x: 0, y: 300, width: 900, height: 500))
+let curtainWindow = BackdropScene.Window(number: 3, layer: 25, frame: sceneBand)
+let scene = BackdropScene(frontPID: 10, windows: [nearWindow, farWindow], band: sceneBand)
+check(scene == BackdropScene(frontPID: 10, windows: [nearWindow, curtainWindow], band: sceneBand),
+      "Curtain animation and windows far below the bar do not recapture a cached background")
+check(scene != BackdropScene(frontPID: 11, windows: [nearWindow], band: sceneBand),
+      "An app switch refreshes cached native appearance even when wallpaper metadata is unchanged")
+let movedWindow = BackdropScene.Window(number: 1, layer: 0, frame: nearWindow.frame.offsetBy(dx: 20, dy: 0))
+check(scene != BackdropScene(frontPID: 10, windows: [movedWindow], band: sceneBand),
+      "Moving a window that contributes a menu-bar shadow invalidates its cached rendering")
 check(prefs.sameAnimation && prefs.animation(for: .left) == .curtain && prefs.animation(for: .right) == .curtain,
       "Mirrored curtains are the shared default")
 prefs.sharedAnimation = .fade; prefs.linkAnimations(false); prefs.rightAnimation = .hiddenBar

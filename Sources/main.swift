@@ -44,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             self.left.refreshBackground(); self.right.refreshBackground()
         })
+        observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { _ in MenuBarBackdrop.shared.checkScene() })
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { _ in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { MenuBarBackdrop.shared.refreshAppearance() }
         })
@@ -94,6 +95,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             wasAuthorized = authorized; hiddenBarWasRunning = competing
             applyPreferences()
         }
+        MenuBarBackdrop.shared.checkScene()
         right.tick()
     }
     @objc func togglePause() { prefs.paused.toggle(); applyPreferences() }

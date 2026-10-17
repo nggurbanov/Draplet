@@ -68,7 +68,7 @@ struct SettingsView: View {
                         ForEach(BackgroundMode.allCases, id: \.self) { mode in Text(mode.title).tag(mode) }
                     }.pickerStyle(.segmented)
                     Text(prefs.backgroundMode == .cached
-                         ? "Capture once, then refresh when the wallpaper, Space or appearance changes. Best for still wallpapers."
+                         ? "Capture once, then refresh when the wallpaper, nearby windows or appearance changes. Best for still wallpapers."
                          : "Keep the cover moving with an animated wallpaper. Uses more energy than Cached.")
                         .font(.caption).foregroundStyle(.secondary)
                     Button("Refresh Background") { MenuBarBackdrop.shared.refreshAppearance() }

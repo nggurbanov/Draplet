@@ -86,6 +86,39 @@ struct WallpaperFingerprint: Equatable {
     }
 }
 
+// A still wallpaper can have a changing rendered backdrop: windows near the
+// bar contribute shadows, and activation changes their appearance. Ignore our
+// own cover/status windows so animating the curtains cannot invalidate the cache.
+struct BackdropScene: Equatable {
+    struct Window: Equatable {
+        let number: Int
+        let layer: Int
+        let frame: CGRect
+    }
+    let frontPID: pid_t
+    let windows: [Window]
+    init(frontPID: pid_t, windows: [Window], band: CGRect) {
+        self.frontPID = frontPID
+        self.windows = windows.filter {
+            $0.layer >= 0 && $0.layer < 24 && $0.frame.maxX > band.minX && $0.frame.minX < band.maxX
+                && $0.frame.maxY > band.minY && $0.frame.minY < band.maxY + 80
+        }
+    }
+    static func current() -> Self {
+        let display = CGDisplayBounds(CGMainDisplayID())
+        let height = max(NSStatusBar.system.thickness, NSScreen.screens.first?.safeAreaInsets.top ?? 0)
+        let band = CGRect(x: display.minX, y: display.minY, width: display.width, height: height)
+        let rows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
+        let windows = rows.compactMap { row -> Window? in
+            guard let rect = row[kCGWindowBounds as String] as? [String: Any],
+                  let frame = CGRect(dictionaryRepresentation: rect as CFDictionary) else { return nil }
+            return Window(number: row[kCGWindowNumber as String] as? Int ?? 0,
+                          layer: row[kCGWindowLayer as String] as? Int ?? 0, frame: frame)
+        }
+        return Self(frontPID: NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0, windows: windows, band: band)
+    }
+}
+
 // Mutable presentation state is confined to main. The capture queue only uses
 // its own CIContext and hands immutable CGImages back to main.
 final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {
@@ -106,10 +139,13 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var nativeWindow: SCWindow?
     private var desktopFilter: SCContentFilter?
     private var desktopConfig: SCStreamConfiguration?
+    private var includedOwnWindows = Set<Int>()
+    private var filterUpdateInFlight = false
     private var monitor: Timer?
     private var nativeRefresh: Timer?
     private var pendingRefresh: DispatchWorkItem?
     private var wallpaper: WallpaperFingerprint?
+    private var scene: BackdropScene?
     private var nativeInFlight = false
     private var desktopInFlight = false
     private var refreshAgain = false
@@ -117,6 +153,8 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var generation = 0
     private let imageContext = CIContext(options: [.cacheIntermediates: false])
     private let captureQueue = DispatchQueue(label: "Draplet.MenuBarBackground", qos: .userInitiated)
+    private var queuedStreamID: ObjectIdentifier?
+    private var singleFrameCapture = false
     private var captureNeedsDesktop = true
     private var lastFingerprint: UInt64?
     var permission: Bool { CGPreflightScreenCaptureAccess() }
@@ -127,8 +165,8 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         guard failure == nil, permission else { return }
         if active { stop() }
         self.mode = mode; active = true; generation += 1; let token = generation
-        wallpaper = .current()
-        captureQueue.async { [self] in self.captureNeedsDesktop = true; self.lastFingerprint = nil }
+        wallpaper = .current(); scene = .current()
+        captureQueue.async { [self] in self.singleFrameCapture = false; self.captureNeedsDesktop = true; self.lastFingerprint = nil }
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
@@ -140,12 +178,7 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 }
                 let height = max(NSStatusBar.system.thickness, screen.safeAreaInsets.top) + 1
                 self.screenFrame = NSRect(x: screen.frame.minX, y: screen.frame.maxY - height, width: screen.frame.width, height: height)
-                // Exclude our future covers by app, but other overlays by window:
-                // excluding their entire app could remove a live-wallpaper provider.
-                let excludedApps = content.applications.filter { $0.processID == getpid() }
-                let overlays = content.windows.filter { $0.windowLayer >= 24 && $0.owningApplication?.processID != getpid() }
-                let filter = SCContentFilter(display: display, excludingApplications: excludedApps, exceptingWindows: overlays)
-                filter.includeMenuBar = false
+                let filter = self.makeDesktopFilter(content: content, display: display)
                 self.desktopFilter = filter
                 // macOS also advertises inactive black menu-bar windows. Prefer
                 // the visible native bar, with the oldest WindowServer bar as the
@@ -165,6 +198,10 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                     let capture = SCStream(filter: filter, configuration: config, delegate: self)
                     try capture.addStreamOutput(self, type: .screen, sampleHandlerQueue: self.captureQueue)
                     self.stream = capture
+                    let captureID = ObjectIdentifier(capture)
+                    self.captureQueue.async { [self] in
+                        self.queuedStreamID = captureID; self.lastFingerprint = nil; self.singleFrameCapture = false
+                    }
                     try await capture.startCapture()
                     guard token == self.generation else { try? await capture.stopCapture(); return }
                     let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in self?.refreshNativeTreatment() }
@@ -185,7 +222,43 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
     // Coalesce provider, Space and appearance events. Keep the last good image
     // visible until its replacement is ready, avoiding an exposed-menu flash.
-    func refreshAppearance() {
+    private func makeDesktopFilter(content: SCShareableContent, display: SCDisplay) -> SCContentFilter {
+        // Exclude future covers by app, then whitelist our ordinary windows so
+        // Settings contributes its real shadow without feeding the covers back.
+        let excludedApps = content.applications.filter { $0.processID == getpid() }
+        let overlays = content.windows.filter { $0.isOnScreen && $0.windowLayer >= 24 && $0.owningApplication?.processID != getpid() }
+        let ownWindows = content.windows.filter { $0.owningApplication?.processID == getpid() && $0.windowLayer == 0 }
+        includedOwnWindows = Set(ownWindows.map { Int($0.windowID) })
+        let filter = SCContentFilter(display: display, excludingApplications: excludedApps, exceptingWindows: overlays + ownWindows)
+        filter.includeMenuBar = false
+        return filter
+    }
+    func checkScene() {
+        guard active else { return }
+        if mode == .live {
+            let ownWindows = Set(NSApp.windows.filter { $0.isVisible && $0.level.rawValue < 24 }.map(\.windowNumber))
+            guard !ownWindows.isSubset(of: includedOwnWindows), !filterUpdateInFlight, let capture = stream else { return }
+            filterUpdateInFlight = true; let token = generation
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                defer { if token == self.generation { self.filterUpdateInFlight = false } }
+                do {
+                    let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+                    guard token == self.generation, self.stream === capture,
+                          let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) else { return }
+                    let filter = self.makeDesktopFilter(content: content, display: display)
+                    self.desktopFilter = filter
+                    try await capture.updateContentFilter(filter)
+                } catch { if token == self.generation { self.fail(error.localizedDescription) } }
+            }
+        } else {
+            let current = BackdropScene.current()
+            guard current != scene else { return }
+            scene = current
+            refreshAppearance(after: 0.05)
+        }
+    }
+    func refreshAppearance(after delay: TimeInterval = 0.4) {
         guard active else { return }
         pendingRefresh?.cancel()
         let token = generation
@@ -196,20 +269,39 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             if self.mode == .cached { self.captureDesktop() }
         }
         pendingRefresh = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
     }
     private func captureDesktop() {
-        guard active, let filter = desktopFilter, let config = desktopConfig else { return }
+        guard active, let config = desktopConfig else { return }
         if desktopInFlight { refreshAgain = true; return }
         desktopInFlight = true; let token = generation
-        SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) { [weak self] image, error in
-            DispatchQueue.main.async {
-                guard let self, token == self.generation, self.active else { return }
-                self.desktopInFlight = false
-                if let image {
-                    self.snapshotCount += 1; self.cleanImage = image; self.publish()
-                } else if let error { self.fail(error.localizedDescription); return }
-                if self.refreshAgain { self.refreshAgain = false; self.refreshAppearance() }
+        // SCScreenshotManager flattens this strip without the native lower-edge
+        // shading/border. Freeze a real stream frame, exactly as Live renders it.
+        captureQueue.async { [self] in self.singleFrameCapture = true; self.lastFingerprint = nil }
+        Task { @MainActor [weak self] in
+            guard let self, token == self.generation, self.active else { return }
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+                guard token == self.generation, self.active,
+                      let display = content.displays.first(where: { $0.displayID == CGMainDisplayID() }) else { return }
+                let filter = self.makeDesktopFilter(content: content, display: display)
+                self.desktopFilter = filter
+                let capture = SCStream(filter: filter, configuration: config, delegate: self)
+                try capture.addStreamOutput(self, type: .screen, sampleHandlerQueue: self.captureQueue)
+                self.stream = capture
+                let captureID = ObjectIdentifier(capture)
+                self.captureQueue.async { [self] in
+                    self.queuedStreamID = captureID; self.lastFingerprint = nil; self.singleFrameCapture = true
+                }
+                try await capture.startCapture()
+                guard token == self.generation else { try? await capture.stopCapture(); return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self, weak capture] in
+                    guard let self, let capture, self.stream === capture, self.desktopInFlight else { return }
+                    self.fail("The menu-bar background did not deliver a complete frame. Please retry.")
+                }
+            } catch {
+                guard token == self.generation else { return }
+                self.fail(error.localizedDescription)
             }
         }
     }
@@ -236,7 +328,7 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
     }
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard captureNeedsDesktop, type == .screen, sampleBuffer.isValid,
+        guard queuedStreamID == ObjectIdentifier(stream), (captureNeedsDesktop || singleFrameCapture), type == .screen, sampleBuffer.isValid,
               let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
               let status = attachments.first?[.status] as? Int, SCFrameStatus(rawValue: status) == .complete,
               let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
@@ -257,8 +349,16 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         let image = CIImage(cvPixelBuffer: buffer)
         guard let cgImage = imageContext.createCGImage(image, from: image.extent) else { return }
         DispatchQueue.main.async { [weak self, weak stream] in
-            guard let self, self.stream === stream, self.active else { return }
-            self.frameCount += 1; self.cleanImage = cgImage; self.publish()
+            guard let self, let stream, self.stream === stream, self.active else { return }
+            if self.mode == .cached {
+                guard self.desktopInFlight else { return }
+                self.desktopInFlight = false; self.snapshotCount += 1
+                self.stream = nil
+                self.captureQueue.async { [self] in self.singleFrameCapture = false }
+                Task { try? await stream.stopCapture() }
+            } else { self.frameCount += 1 }
+            self.cleanImage = cgImage; self.publish()
+            if self.refreshAgain { self.refreshAgain = false; self.refreshAppearance() }
         }
     }
     func stream(_ stream: SCStream, didStopWithError error: Error) {
@@ -304,7 +404,7 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         NSGraphicsContext.restoreGraphicsState()
     }
     func stop() {
-        generation += 1; active = false; nativeInFlight = false; desktopInFlight = false; refreshAgain = false
+        generation += 1; active = false; nativeInFlight = false; desktopInFlight = false; refreshAgain = false; filterUpdateInFlight = false
         pendingRefresh?.cancel(); pendingRefresh = nil
         monitor?.invalidate(); monitor = nil; nativeRefresh?.invalidate(); nativeRefresh = nil
         let capture = stream; stream = nil

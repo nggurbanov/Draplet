@@ -51,10 +51,13 @@ cover and reveal the icons. Reduce Motion disables the custom transition.
 
 Settings → Menu-bar background offers:
 
-- **Cached** (default): capture the clean rendered background once, then reuse it.
-  A cheap two-second check compares the wallpaper URL, display options and file
-  metadata. Space/display/wake and appearance events refresh it too; the previous
-  image stays visible until a replacement is ready. No continuous stream runs.
+- **Cached** (default): freeze one complete frame from the same rendering stream
+  as Live, then stop capturing. This retains native shading that macOS's still
+  screenshot API omits. A cheap two-second check compares wallpaper URL/options
+  and file metadata. App activation and window changes near the bar also refresh
+  it, since those windows contribute shadows. Space/display/wake and appearance
+  events refresh it too; the previous image stays visible until its replacement
+  is ready. No stream runs while the scene is unchanged.
 - **Live**: stream the same strip at up to 30 fps for animated wallpapers. Unchanged
   frames are skipped. This uses more energy; choose it for motion providers that
   keep the same wallpaper URL. Refresh Background is also available manually.
@@ -98,6 +101,7 @@ The icon source is `scripts/make-icon.swift`; the generated ICNS is checked in.
 - Background reconstruction preserves the clean underlying strip and the native
   bar's scanline treatment. It is not a guarantee of pixel-perfect reproduction
   of every future Liquid Glass effect or arbitrary horizontal material pattern.
+  Covers stop at the native bar body, leaving the border below it untouched.
 - Left cover level 25 stays below the user's Vorssaint notch UI at level 26.
 - macOS 27 icon hiding uses Hidden Bar's dynamically loaded private menu-bar
   visibility API. A changed/missing API fails open. Hiding is per app bundle,

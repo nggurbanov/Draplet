@@ -83,7 +83,7 @@ final class CoverView: NSView {
         let size = name.size(withAttributes: attributes)
         let width = min(size.width, bounds.width - 45)
         // Native menu titles sit on this pixel-aligned baseline at 2× scale.
-        name.draw(in: NSRect(x: 10.5, y: (bounds.height - size.height) / 2 + 1,
+        name.draw(in: NSRect(x: 10.5, y: (bounds.height - size.height) / 2 + 0.5,
                              width: width + 1, height: size.height), withAttributes: attributes)
     }
 }
@@ -308,7 +308,7 @@ func start() {
     guard let screen = NSScreen.screens.first else { return }
     // Keep startup on the main thread free of AX round-trips too. These are the
     // measured geometry and typography of the approved demo on this Mac.
-    let height = max(NSStatusBar.system.thickness, screen.safeAreaInsets.top) + 1
+    let height = max(NSStatusBar.system.thickness, screen.safeAreaInsets.top)
     let left = screen.frame.minX + 43
     let right = screen.auxiliaryTopLeftArea?.maxX ?? screen.frame.minX + screen.frame.width / 2
     coverFrame = NSRect(x: left, y: screen.frame.maxY - height, width: right - left, height: height)
@@ -410,7 +410,7 @@ func updateClickTarget() {
         hit.isReleasedWhenClosed = false; hit.isOpaque = true; hit.backgroundColor = .windowBackgroundColor
         hit.hasShadow = false; hit.hidesOnDeactivate = false
         let content = IndicatorBackdrop(frame: NSRect(origin: .zero, size: frame.size))
-        let button = IndicatorButton(frame: content.bounds)
+        let button = IndicatorButton(frame: content.bounds.offsetBy(dx: 0, dy: -0.5))
         button.title = ""; button.target = self; button.action = #selector(indicatorClicked)
         button.autoresizingMask = [.width, .height]
         button.isBordered = false; button.focusRingType = .none
