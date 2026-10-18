@@ -1,7 +1,7 @@
 # Draplet
 
 Your menu bar, on demand. A small, free, open-source macOS utility for both sides
-of the menu bar. MIT licensed. Personal daily-use build, 0.4.3.
+of the menu bar. MIT licensed. Personal daily-use build, 0.4.4.
 
 ## Use
 
@@ -30,12 +30,13 @@ of the menu bar. MIT licensed. Personal daily-use build, 0.4.3.
 - Launch at login is opt-in. Reopen `/Applications/Draplet.app` for Settings.
 - Draplet appears in the Dock while Settings is open, including when minimized.
   Closing Settings returns it to menu-bar-only operation.
-- Draplet removes its overlay windows during Mission Control and foreground
-  fullscreen games that cover the native bar. It restores them after the native
-  bar settles and a fresh background returns.
+- Draplet removes its overlay windows during Mission Control, native fullscreen,
+  and foreground fullscreen games that cover the native bar. macOS owns fullscreen
+  menus; native right-side icon hiding continues. Desktop curtains return after
+  the native bar settles and a fresh background arrives.
 - Quit releases the icon-hiding assertion and removes every cover/status item.
 
-Accessibility is required for reading menu geometry. Grant it through Settings;
+Accessibility is required for reading menu geometry and fullscreen window state. Grant it through Settings;
 Draplet detects the grant without a restart. Background matching additionally
 requires Screen & System Audio Recording access (macOS's name for the permission).
 Draplet captures no audio and processes only a narrow menu-bar strip, locally in
@@ -70,11 +71,16 @@ Settings → Appearance → Menu-bar background offers:
   keep the same wallpaper URL. Capture pauses during Mission Control. Refresh
   Background is also available manually.
 
-During Mission Control and hidden-menu fullscreen modes, macOS owns the bar:
+During Mission Control and native fullscreen, macOS owns the bar:
 Draplet's title, arrow and right cover stay out of the transition. A game can
 cover Menubar with its own status-level window even while AppKit reports that
 the menu is visible; foreground ownership, geometry and window level detect
-that case. On return, Draplet first waits for a complete desktop frame, then
+that case. Native fullscreen is read from the foreground window using existing
+Accessibility access: foreground polling runs at most four times per second on a
+serial queue. Running apps are prewarmed once, and cached fullscreen state is used
+before drawing a newly active app's title. The cache is cleared when an app quits.
+This requires no screen capture; late responses from the previous app are discarded.
+On return, Draplet first waits for a complete desktop frame, then
 samples the native bar until its opacity stays unchanged for 100 ms. Native
 colors may keep changing for Live wallpapers. The resulting short capture burst
 ends once the native bar settles; Cached mode keeps no continuous stream. If the
@@ -132,7 +138,7 @@ bash scripts/build-dmg.sh
 ```
 
 The packaging script creates `.build/packaging-venv` and installs pinned dmgbuild
-1.6.7 there if needed. It writes `dist/Draplet-0.4.3.dmg`, verifies the image, mounts
+1.6.7 there if needed. It writes `dist/Draplet-0.4.4.dmg`, verifies the image, mounts
 it temporarily and verifies the packaged app signature, executable and Applications
 shortcut. The approved background is `Resources/Installer/background.tiff`, at 2x
 resolution. Finder opens an 800×500 icon view with actual draggable file targets.
@@ -164,7 +170,7 @@ notarization and automatic updates are outside this build.
 
 ## Validation
 
-`test.sh` runs 102 checks covering LTR/RTL section resolution, protecting the most-visible sibling
+`test.sh` runs 117 checks covering LTR/RTL section resolution, protecting the most-visible sibling
 icon, own/system controls, stale inventory cancellation, late native assertion
 invalidation, successful release, and fail-open activation errors. It also checks
 persisted styles/timing/background mode, wallpaper-file replacement invalidation,
@@ -191,6 +197,14 @@ an unchanged presentation state must not raise a cover above the game. A live
 metadata trace verified that the covers remain absent during the game and return
 on the desktop. After the diagnostic recording was stopped, the user confirmed
 normal brightness and a clean bar after switching back from Minecraft.
+
+Native fullscreen regression checks also replay the captured Fladder state:
+AXFullScreen is true while accessory-process menu visibility is true and native
+presentation options are zero. The regression fails without the AX input. Tests
+cover bounded asynchronous queries, app/Space changes, stale callbacks, startup
+prewarming, cached activation and removal of the actual left title and toggle
+before the shared activation observer. The user confirmed clean Fladder fullscreen
+and desktop return in 0.4.4, then confirmed that build 10 removed the entry title flash.
 
 Read-only window metadata can be collected without recording video:
 

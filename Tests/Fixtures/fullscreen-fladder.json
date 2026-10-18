@@ -1,0 +1,163 @@
+{
+  "source": "Fladder native fullscreen WindowServer and AX capture on macOS 27, 2026-10-18",
+  "frontPID": 85836,
+  "appKitMenuBarVisible": true,
+  "systemPresentationOptions": 0,
+  "axFullScreen": true,
+  "windows": [
+    {
+      "alpha": 1,
+      "frame": {
+        "Height": 33,
+        "Width": 1470,
+        "X": 0,
+        "Y": 0
+      },
+      "id": 13585,
+      "layer": 24,
+      "onScreen": true,
+      "owner": "Window Server",
+      "pid": 408
+    },
+    {
+      "alpha": 1,
+      "frame": {
+        "Height": 33,
+        "Width": 1470,
+        "X": 0,
+        "Y": 0
+      },
+      "id": 13550,
+      "layer": 0,
+      "onScreen": false,
+      "owner": "Fladder",
+      "pid": 85836
+    },
+    {
+      "alpha": 1,
+      "frame": {
+        "Height": 33,
+        "Width": 1470,
+        "X": 0,
+        "Y": 0
+      },
+      "id": 13549,
+      "layer": 0,
+      "onScreen": false,
+      "owner": "Fladder",
+      "pid": 85836
+    },
+    {
+      "alpha": 1,
+      "frame": {
+        "Height": 33,
+        "Width": 1470,
+        "X": 0,
+        "Y": 0
+      },
+      "id": 13548,
+      "layer": 0,
+      "onScreen": false,
+      "owner": "Fladder",
+      "pid": 85836
+    },
+    {
+      "alpha": 1,
+      "frame": {
+        "Height": 33,
+        "Width": 1470,
+        "X": 0,
+        "Y": 0
+      },
+      "id": 13547,
+      "layer": 0,
+      "onScreen": false,
+      "owner": "Fladder",
+      "pid": 85836
+    },
+    {
+      "alpha": 1,
+      "frame": {
+        "Height": 923,
+        "Width": 1470,
+        "X": 0,
+        "Y": 33
+      },
+      "id": 13546,
+      "layer": 0,
+      "onScreen": true,
+      "owner": "Fladder",
+      "pid": 85836
+    },
+    {
+      "alpha": 1,
+      "frame": {
+        "Height": 32,
+        "Width": 603,
+        "X": 43,
+        "Y": 0
+      },
+      "id": 13532,
+      "layer": 25,
+      "onScreen": true,
+      "owner": "Draplet",
+      "pid": 80157
+    },
+    {
+      "alpha": 1,
+      "frame": {
+        "Height": 33,
+        "Width": 1470,
+        "X": 0,
+        "Y": 0
+      },
+      "id": 13528,
+      "layer": 24,
+      "onScreen": false,
+      "owner": "Window Server",
+      "pid": 408
+    },
+    {
+      "alpha": 1,
+      "frame": {
+        "Height": 32,
+        "Width": 373,
+        "X": 824,
+        "Y": 0
+      },
+      "id": 13353,
+      "layer": 25,
+      "onScreen": true,
+      "owner": "Draplet",
+      "pid": 80157
+    },
+    {
+      "alpha": 1,
+      "frame": {
+        "Height": 32,
+        "Width": 18,
+        "X": 109,
+        "Y": 0
+      },
+      "id": 13533,
+      "layer": 25,
+      "onScreen": true,
+      "owner": "Draplet",
+      "pid": 80157
+    },
+    {
+      "alpha": 1,
+      "frame": {
+        "Height": 44,
+        "Width": 1470,
+        "X": 0,
+        "Y": 30
+      },
+      "id": 13580,
+      "layer": 0,
+      "onScreen": true,
+      "owner": "Fladder",
+      "pid": 85836
+    }
+  ]
+}

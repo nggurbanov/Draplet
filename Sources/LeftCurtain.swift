@@ -201,9 +201,16 @@ func animate() {
     }
 }
 
-func updateTitle() {
+func updateTitle(presentationActive: () -> Bool = SystemPresentation.current) {
     guard let front = NSWorkspace.shared.frontmostApplication,
           front.processIdentifier != currentPID else { return }
+    // Workspace observers can run in either order. Resolve a cached fullscreen
+    // Space before drawing its title, even if our activation observer runs first.
+    if presentationActive() {
+        setPresentationSuppressed(true)
+        MenuBarBackdrop.shared.checkScene()
+        return
+    }
     let wasVisible = panel?.isVisible ?? false
     currentPID = front.processIdentifier
     manuallyCollapsed = false

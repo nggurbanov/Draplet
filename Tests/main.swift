@@ -50,6 +50,49 @@ final class Visibility: NativeVisibilityProviding {
 }
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
+var fullscreenQueries: [(pid_t, (Bool) -> Void)] = []
+let foregroundFullscreen = ForegroundFullscreen { pid, completion in fullscreenQueries.append((pid, completion)) }
+check(!foregroundFullscreen.current(pid: 85836, at: 0) && fullscreenQueries.count == 1,
+      "Reading another app's fullscreen state starts one asynchronous AX request")
+fullscreenQueries[0].1(true)
+check(foregroundFullscreen.current(pid: 85836, at: 0.2) && fullscreenQueries.count == 1,
+      "Native fullscreen remains known without querying AX on every animation frame")
+check(foregroundFullscreen.current(pid: 9309, at: 0.21) && fullscreenQueries.count == 2,
+      "Switching apps retains fullscreen suppression until the new window is checked")
+fullscreenQueries[1].1(false)
+check(!foregroundFullscreen.current(pid: 9309, at: 0.24),
+      "A confirmed desktop window releases fullscreen suppression")
+check(foregroundFullscreen.current(pid: 85836, at: 0.3) && fullscreenQueries.count == 3,
+      "Returning to a known fullscreen app suppresses covers before a fresh AX response arrives")
+_ = foregroundFullscreen.current(pid: 9309, at: 0.31)
+check(fullscreenQueries.count == 3, "Rapid switches cannot queue parallel AX requests")
+fullscreenQueries[2].1(true)
+check(!foregroundFullscreen.current(pid: 9309, at: 0.32) && fullscreenQueries.count == 4,
+      "An old app's late fullscreen response cannot suppress the current desktop")
+fullscreenQueries[3].1(false)
+foregroundFullscreen.invalidate()
+_ = foregroundFullscreen.current(pid: 9309, at: 0.33)
+fullscreenQueries[4].1(true)
+check(foregroundFullscreen.current(pid: 9309, at: 0.34),
+      "A Space change refreshes fullscreen state even when the foreground PID stays the same")
+var warmQueries: [(pid_t, (Bool) -> Void)] = []
+let warmedFullscreen = ForegroundFullscreen { pid, completion in warmQueries.append((pid, completion)) }
+warmedFullscreen.prewarm([5400, 5400]); warmedFullscreen.prewarm([5400])
+check(warmQueries.count == 1, "Startup background fullscreen checks are deduplicated")
+warmQueries[0].1(true)
+check(warmedFullscreen.current(pid: 5400, at: 0) && warmQueries.count == 2,
+      "An app already fullscreen at startup is suppressed on its first activation, before revalidation")
+warmQueries[1].1(false)
+warmedFullscreen.prewarm([86020])
+_ = warmedFullscreen.current(pid: 86020, at: 0.1)
+warmQueries[3].1(true); warmQueries[2].1(false)
+check(warmedFullscreen.current(pid: 86020, at: 0.2),
+      "A late startup snapshot cannot overwrite a newer foreground fullscreen result")
+_ = warmedFullscreen.current(pid: 5400, at: 0.3)
+warmQueries[4].1(false)
+warmedFullscreen.forget(pid: 86020)
+check(!warmedFullscreen.current(pid: 86020, at: 0.4),
+      "Terminated processes cannot leave a fullscreen cache entry for a reused PID")
 let mainDisplay = CGRect(x: 0, y: 0, width: 1470, height: 956)
 let secondDisplay = CGRect(x: -1920, y: -124, width: 1920, height: 1080)
 func overviewWindow(pid: pid_t = 42, layer: Int = 20, frame: CGRect = mainDisplay, alpha: Double = 1) -> [String: Any] {
@@ -101,7 +144,22 @@ check(!suppress([hiddenGame, overviewWindow(pid: gamePID, layer: 25, alpha: 0)])
 check(suppress([], options: [.hideDock, .hideMenuBar]) && suppress([], options: [.fullScreen, .autoHideMenuBar]),
       "Native hidden-menu presentation modes also suppress Draplet without requiring a game canvas")
 check(!suppress([], options: [.fullScreen]),
-      "Native fullscreen with an always-visible menu bar retains Draplet")
+      "The accessory process's fullscreen hint alone does not suppress Draplet")
+let nativeFixture = try! JSONSerialization.jsonObject(with: Data(contentsOf:
+    URL(fileURLWithPath: "Tests/Fixtures/fullscreen-fladder.json"))) as! [String: Any]
+let nativeWindows = (nativeFixture["windows"] as! [[String: Any]]).map { row in
+    [kCGWindowOwnerPID as String: row["pid"]!, kCGWindowLayer as String: row["layer"]!,
+     kCGWindowBounds as String: row["frame"]!, kCGWindowAlpha as String: row["alpha"]!,
+     kCGWindowIsOnscreen as String: row["onScreen"]!]
+}
+let nativeSuppressed = SystemPresentation.isActive(windows: nativeWindows, dockPID: 42,
+    frontPID: nativeFixture["frontPID"] as! pid_t, displays: [mainDisplay, secondDisplay],
+    menuBarDisplay: mainDisplay, options: [], nativeFullscreen: nativeFixture["axFullScreen"] as! Bool)
+check(nativeFixture["appKitMenuBarVisible"] as? Bool == true && nativeSuppressed,
+      "The captured Fladder AX fullscreen state withdraws all overlays despite normal accessory-process menu hints")
+check(!SystemPresentation.isActive(windows: nativeWindows, dockPID: 42,
+    frontPID: nativeFixture["frontPID"] as! pid_t, displays: [mainDisplay, secondDisplay], menuBarDisplay: mainDisplay),
+      "Returning from native fullscreen releases suppression without mistaking ordinary Fladder windows for a game")
 let cover = NSRect(x: 43, y: 923, width: 602.5, height: 33)
 let openArrow = LeftCurtain.indicatorFrame(cover: cover, titleWidth: 100, menuEnd: 377, expanded: true)
 check(openArrow.minX >= cover.minX + 377 && openArrow.maxX <= cover.maxX,
@@ -157,10 +215,14 @@ if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
     curtain.updateClickTarget()
     check(curtain.clickPanel!.frame.minX == expandedX,
           "Fade keeps its opaque toggle clear of partially visible native headings")
-    curtain.setPresentationSuppressed(true)
+    curtain.currentPID = 0
+    curtain.updateTitle(presentationActive: { nativeSuppressed })
+    check(curtain.presentationSuppressed && !testPanel.isVisible && curtain.clickPanel?.isVisible == false,
+          "The left activation callback withdraws title and arrow before painting a fullscreen app, even before the shared observer")
+    curtain.setPresentationSuppressed(nativeSuppressed)
     curtain.syncVisibility(); curtain.updateClickTarget(); curtain.tick()
     check(!testPanel.isVisible && curtain.clickPanel?.isVisible == false,
-          "Mission Control explicitly removes both left windows; visibility polling cannot bring them back")
+          "Native fullscreen removes both the drawn app title and its toggle; visibility polling cannot bring them back")
     curtain.setPresentationSuppressed(false)
     check(testPanel.isVisible && curtain.clickPanel?.isVisible == true,
           "Restoring the desktop returns both left windows after presentation is allowed")

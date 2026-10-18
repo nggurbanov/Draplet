@@ -51,6 +51,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.left.setPresentationSuppressed(MenuBarBackdrop.shared.presentationSuppressed)
             self?.right.setPresentationSuppressed(MenuBarBackdrop.shared.presentationSuppressed)
         })
+        ForegroundFullscreen.shared.onChange = { MenuBarBackdrop.shared.checkScene() }
+        observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { notification in
+            if let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
+                ForegroundFullscreen.shared.forget(pid: app.processIdentifier)
+            }
+        })
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { _ in MenuBarBackdrop.shared.checkScene() })
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { _ in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { MenuBarBackdrop.shared.refreshAppearance() }
@@ -58,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in self?.refreshDisplays() })
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in self?.refreshDisplays() })
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            ForegroundFullscreen.shared.invalidate()
             MenuBarBackdrop.shared.checkScene()
             self?.left.syncVisibility()
             MenuBarBackdrop.shared.refreshAppearance()
@@ -88,6 +95,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !terminating else { return }
         previewGeneration += 1
         prefs.permissionGranted = AXIsProcessTrusted()
+        if prefs.permissionGranted && prefs.needsBackground {
+            ForegroundFullscreen.shared.prewarm(NSWorkspace.shared.runningApplications
+                .filter { $0.activationPolicy == .regular && $0.processIdentifier != ProcessInfo.processInfo.processIdentifier }
+                .map(\.processIdentifier))
+        }
         prefs.backgroundPermission = MenuBarBackdrop.shared.permission
         if prefs.needsBackground { MenuBarBackdrop.shared.start(mode: prefs.backgroundMode) } else { MenuBarBackdrop.shared.stop() }
         if prefs.leftEnabled && !prefs.paused && prefs.permissionGranted && MenuBarBackdrop.shared.ready { left.start() }
@@ -187,6 +199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func cleanup() {
         guard !terminating else { return }; terminating = true
         appearanceObserver = nil; presentationObserver = nil
+        ForegroundFullscreen.shared.onChange = nil
         pulse?.invalidate(); left.stop(); right?.stop(); MenuBarBackdrop.shared.stop()
         if let hotkey { UnregisterEventHotKey(hotkey) }
         if let eventHandler { RemoveEventHandler(eventHandler) }
@@ -215,6 +228,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             "backgroundReady": MenuBarBackdrop.shared.ready, "backgroundPermission": MenuBarBackdrop.shared.permission,
                             "systemPresentationSuspended": MenuBarBackdrop.shared.systemPresentationSuspended,
                             "presentationSuppressed": MenuBarBackdrop.shared.presentationSuppressed,
+                            "nativeFullscreen": ForegroundFullscreen.shared.isFullscreen,
                             "rightAnimation": self.right.animationStatus,
                             "hitWindow": self.left.clickPanel?.windowNumber ?? 0,
                             "hitVisible": self.left.clickPanel?.isVisible ?? false,

@@ -1,11 +1,14 @@
 import AppKit
 
 // Some games cover the native bar with a screen-sized status-level window while
-// both AppKit visibility APIs still report a normal menu bar. Observe actual
-// window geometry as well as native presentation flags; no pixel capture or AX.
+// both AppKit visibility APIs still report a normal menu bar. Native fullscreen
+// apps can do the same, so combine window geometry with their focused AX window.
+// This uses existing Accessibility access, without pixel capture.
 enum SystemPresentation {
     private static var dock: NSRunningApplication?
     static func current() -> Bool {
+        let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
+        let nativeFullscreen = ForegroundFullscreen.shared.current(pid: frontPID)
         if dock == nil || dock?.isTerminated == true {
             dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first
         }
@@ -15,13 +18,16 @@ enum SystemPresentation {
                 .map { CGDisplayBounds($0.uint32Value) }
         }
         return isActive(windows: windows, dockPID: dock?.processIdentifier ?? -1,
-                        frontPID: NSWorkspace.shared.frontmostApplication?.processIdentifier ?? -1,
+                        frontPID: frontPID,
                         displays: displays, menuBarDisplay: CGDisplayBounds(CGMainDisplayID()),
-                        options: NSApp.currentSystemPresentationOptions)
+                        options: NSApp.currentSystemPresentationOptions, nativeFullscreen: nativeFullscreen)
     }
     static func isActive(windows: [[String: Any]], dockPID: pid_t, frontPID: pid_t,
                          displays: [CGRect], menuBarDisplay: CGRect,
-                         options: NSApplication.PresentationOptions = []) -> Bool {
+                         options: NSApplication.PresentationOptions = [], nativeFullscreen: Bool = false) -> Bool {
+        // Leave native fullscreen chrome entirely to macOS. A nonactivating
+        // cover can otherwise keep its titlebar awake or leave our title behind.
+        if nativeFullscreen { return true }
         if options.contains(.hideMenuBar) || options.contains([.fullScreen, .autoHideMenuBar]) { return true }
         if isOverview(windows: windows, dockPID: dockPID, displays: displays) { return true }
         guard frontPID > 0, !menuBarDisplay.isEmpty else { return false }
