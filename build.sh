@@ -6,16 +6,19 @@ sparkle="$PWD/.build/dependencies/sparkle-2.10.0"
 mkdir -p .build/Draplet.app/Contents/{MacOS,Resources,Frameworks}
 xcrun clang -fobjc-arc -fblocks -DHIDDENBAR_NATIVE_VISIBILITY=1 \
   -mmacosx-version-min=14.2 -c Vendor/HiddenBar/Engine/Native/HBNativeVisibilityShim.m -o .build/NativeVisibility.o
-swift_sources=(Sources/*.swift Vendor/HiddenBar/Engine/*.swift Vendor/HiddenBar/Engine/Native/*.swift Vendor/HiddenBar/Layout/*.swift)
+swift_sources=(Sources/*.swift Vendor/Ice/*.swift Vendor/HiddenBar/Engine/*.swift Vendor/HiddenBar/Engine/Native/*.swift Vendor/HiddenBar/Layout/*.swift)
 xcrun clang -fobjc-arc -fblocks -mmacosx-version-min=14.2 -c Sources/WindowServerBridge.m -o .build/WindowServerBridge.o
+xcrun clang -fobjc-arc -fblocks -mmacosx-version-min=14.2 -c Vendor/Ice/PocketWindowAccess.m -o .build/PocketWindowAccess.o
 xcrun swiftc -O -swift-version 5 -target "$(uname -m)-apple-macos14.2" -D HIDDENBAR_NATIVE_VISIBILITY \
   -module-cache-path "${TMPDIR:-/tmp}/codex-swift-module-cache" \
   -import-objc-header Sources/WindowServerBridge.h \
   -F "$sparkle" -framework Sparkle -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
-  "${swift_sources[@]}" .build/NativeVisibility.o .build/WindowServerBridge.o -o .build/Draplet.app/Contents/MacOS/Draplet
+  "${swift_sources[@]}" .build/NativeVisibility.o .build/WindowServerBridge.o .build/PocketWindowAccess.o -o .build/Draplet.app/Contents/MacOS/Draplet
 cp Resources/Info.plist .build/Draplet.app/Contents/Info.plist
 ditto "$sparkle/Sparkle.framework" .build/Draplet.app/Contents/Frameworks/Sparkle.framework
 cp "$sparkle/LICENSE" .build/Draplet.app/Contents/Resources/Sparkle-LICENSE
+cp Vendor/Ice/LICENSE .build/Draplet.app/Contents/Resources/Ice-LICENSE
+cp LICENSES/Draplet-original-MIT.txt .build/Draplet.app/Contents/Resources/Draplet-original-MIT.txt
 cp LICENSE ThirdPartyNotices.md .build/Draplet.app/Contents/Resources/
 cp Vendor/HiddenBar/LICENSE .build/Draplet.app/Contents/Resources/HiddenBar-LICENSE
 mkdir -p .build/Draplet.app/Contents/Resources/HiddenBar

@@ -7,7 +7,7 @@
 <key>CFBundleExecutable</key><string>Draplet</string>
 <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.5.0</string>
-  <key>CFBundleVersion</key><string>13</string>
+  <key>CFBundleVersion</key><string>14</string>
 <key>CFBundleIconFile</key><string>Draplet</string>
 <key>LSMinimumSystemVersion</key><string>14.2</string>
 <key>LSUIElement</key><true/>

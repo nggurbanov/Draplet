@@ -8,6 +8,11 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
     private(set) var alwaysHiddenItem: NSStatusItem?
     lazy var engine = MenuBarEngineFactory.make(items: self)
     private let cover = RightMenuCover()
+    private var pocket: MenuBarPocket?
+    private var pocketMode: RightRevealMode = .menuBar
+    private var pocketGeneration = 0
+    private var pocketRequest: Bool?
+    var pocketStatus: [String: Any] { pocket?.debugStatus ?? ["visible": false, "busy": false, "items": 0, "images": 0] }
     private lazy var transition = RightMenuTransition(engine: engine, cover: cover)
     private let prefs = Preferences.shared
     private var collapseTimer: Timer?
@@ -44,11 +49,15 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
         configure()
     }
     func configure() {
+        if pocketMode != prefs.rightRevealMode || !canManage {
+            pocketGeneration += 1; pocketRequest = nil; pocket?.close(); pocketMode = prefs.rightRevealMode
+        }
         cover.setPresentationSuppressed(MenuBarBackdrop.shared.presentationSuppressed)
         updateHoverMonitor()
         let next = "\(canManage)-\(prefs.alwaysHidden)-\(prefs.autoCollapse)-\(prefs.collapseDelay)-\(prefs.fullWidth)-\(MenuBarBackdrop.shared.ready)"
         guard next != configuration else { updatePresentation(); return }
         configuration = next
+        pocketGeneration += 1; pocket?.close()
         collapseTimer?.invalidate()
         transition.cancelAndExpand()
         if prefs.alwaysHidden && alwaysHiddenItem == nil {
@@ -66,10 +75,16 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
         if canManage { scheduleCollapse() }
     }
     func updatePresentation() {
-        let collapsed = !transition.expanded
+        let pocketVisible = pocket?.isVisible ?? false
+        let collapsed = prefs.rightRevealMode == .pocket ? !pocketVisible : !transition.expanded
         toggleItem.button?.image = IndicatorIcons.image(for: .right, expanded: !collapsed)
+        if prefs.rightRevealMode == .pocket && canManage {
+            toggleItem.button?.setAccessibilityLabel(pocketVisible ? "Close Pocket" : "Open Pocket")
+            toggleItem.button?.toolTip = "Draplet · Click to \(pocketVisible ? "close" : "open") Pocket · Right-click for settings"
+        } else {
         toggleItem.button?.setAccessibilityLabel(collapsed ? "Reveal status icons" : "Hide status icons")
         toggleItem.button?.toolTip = "Draplet · Click to \(collapsed ? "reveal" : "hide") icons · Right-click for settings"
+        }
         if !prefs.rightEnabled || prefs.paused { prefs.rightStatus = "Paused" }
         else if competingApp != nil { prefs.rightStatus = "Waiting for Hidden Bar to quit" }
         else if !prefs.permissionGranted { prefs.rightStatus = "Accessibility permission needed" }
@@ -99,14 +114,14 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
         } else if NSApp.currentEvent?.modifierFlags.contains(.option) == true {
             revealAllMode.toggle()
             separatorsHidden = !revealAllMode
-            expand()
+            if prefs.rightRevealMode == .pocket { showPocket(all: revealAllMode) } else { expand() }
         } else if !canManage {
             onSettings?()
         } else {
-            transition.expanded ? collapse() : expand()
+            if prefs.rightRevealMode == .pocket { togglePocket() } else { transition.expanded ? collapse() : expand() }
         }
     }
-    @objc private func settings() { onSettings?() }
+    @objc private func settings() { pocket?.close(); onSettings?() }
     @objc private func pause() { onPause?() }
     @objc private func revealBoth() { onRevealAll?() }
     @objc private func quit() { NSApp.terminate(nil) }
@@ -132,10 +147,11 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
     func refreshBackground() { cover.refreshBackground() }
     func setPresentationSuppressed(_ suppressed: Bool) {
         cover.setPresentationSuppressed(suppressed)
-        if suppressed { cancelHover() }
+        if suppressed { cancelHover(); pocketGeneration += 1; pocketRequest = nil; pocket?.close() }
     }
     func collapse(completion: ((CollapseResult) -> Void)? = nil) {
         collapseTimer?.invalidate()
+        if pocket?.isVisible == true || pocket?.isBusy == true { pocketGeneration += 1; pocket?.close() }
         guard canManage, engine.isArrangementValid else { completion?(.unavailable); return }
         if prefs.alwaysHidden && !engine.isAlwaysHiddenSeparatorPlaced {
             prefs.error = "⌘-drag the dotted separator to the left of Draplet’s arrow first."
@@ -159,6 +175,7 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
     }
     func expand(all: Bool = false, onStart: @escaping () -> Void = {}) {
         collapseTimer?.invalidate()
+        pocketGeneration += 1; pocketRequest = nil; pocket?.close()
         if all { revealAllMode = true; separatorsHidden = false }
         engine.updateAlwaysHiddenSection(enabled: canManage && prefs.alwaysHidden, separatorHidden: !revealAllMode)
         if prefs.fullWidth && canManage { NSApp.activate(ignoringOtherApps: true) }
@@ -172,7 +189,7 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
         collapseTimer?.invalidate()
         let timer = Timer(timeInterval: max(1, prefs.collapseDelay), repeats: false) { [weak self] _ in
             guard let self, self.canManage else { return }
-            if self.mouseInBar || self.isSettingsVisible() || self.nativeMenuOpen {
+            if self.mouseInBar || self.isSettingsVisible() || self.nativeMenuOpen || self.pocket?.isVisible == true || self.pocket?.isBusy == true {
                 self.scheduleCollapse()
             } else { self.collapse() }
         }
@@ -197,22 +214,50 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
         }
     }
     func tick() {
+        pocket?.tick()
+        if let all = pocketRequest, engine.state == .collapsed || engine.state == .expanded { showPocket(all: all) }
         guard !MenuBarBackdrop.shared.presentationSuppressed else { cancelHover(); return }
         if !NSMenu.menuBarVisible(), cover.isVisible { transition.cancelAndExpand(); updatePresentation() }
         if !transition.expanded { cover.updateClosedFrame(animationFrame) }
         guard canManage, prefs.trigger(for: .right) == .hover, engine.state == .collapsed else { cancelHover(); return }
         guard let frame = toggleItem.button?.window?.frame,
               frame.insetBy(dx: -3, dy: -3).contains(NSEvent.mouseLocation) else { cancelHover(); return }
-        guard hoverTimer == nil, Date().timeIntervalSince(lastCollapse) > 0.5 else { return }
+        guard pocketRequest == nil, pocket?.isVisible != true, pocket?.isBusy != true, hoverTimer == nil, Date().timeIntervalSince(lastCollapse) > 0.5 else { return }
         let timer = Timer(timeInterval: 0.08, repeats: false) { [weak self] _ in
             guard let self else { return }; self.hoverTimer = nil
             guard self.canManage, self.prefs.trigger(for: .right) == .hover, self.engine.state == .collapsed,
                   let frame = self.toggleItem.button?.window?.frame,
                   frame.insetBy(dx: -3, dy: -3).contains(NSEvent.mouseLocation) else { return }
-            self.expand()
+            if self.prefs.rightRevealMode == .pocket { self.showPocket() } else { self.expand() }
         }
         hoverTimer = timer
         RunLoop.main.add(timer, forMode: .common)
+    }
+    func setPocketAppearance(_ appearance: NSAppearance?) { pocket?.setAppearance(appearance) }
+    func activatePocketItem(_ name: String, button: CGMouseButton) { pocket?.activateNamed(name, button: button) }
+    func togglePocket() {
+        if pocket?.isVisible == true || pocketRequest != nil { pocketRequest = nil; pocketGeneration += 1; pocket?.close(); lastCollapse = Date(); updatePresentation() }
+        else { showPocket() }
+    }
+    func showPocket(all: Bool = false) {
+        guard canManage, !SystemPresentation.current() else { return }
+        collapseTimer?.invalidate()
+        // Calibrate the user's normal layout before exposing any one bundle.
+        if engine.state != .collapsed {
+            pocketRequest = all
+            if engine.state != .calibrating {
+                collapse { [weak self] result in
+                    if result == .unavailable { self?.pocketRequest = nil; self?.prefs.error = "Pocket couldn’t read the icon layout. Reveal the menu bar and try again." }
+                }
+            }
+            return
+        }
+        pocketRequest = nil
+        if pocket == nil {
+            pocket = MenuBarPocket(owner: self)
+            pocket?.onChange = { [weak self] in self?.updatePresentation() }
+        }
+        pocket?.open(all: all)
     }
     private func cancelHover() { hoverTimer?.invalidate(); hoverTimer = nil }
     private func updateHoverMonitor() {
@@ -227,6 +272,7 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
     }
     func stop() {
         guard !stopped else { return }; stopped = true
+        pocketGeneration += 1; pocketRequest = nil; pocket?.close(); pocket = nil
         cancelHover()
         if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor) }
         if let localMouseMonitor { NSEvent.removeMonitor(localMouseMonitor) }

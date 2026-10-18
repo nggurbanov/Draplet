@@ -3,3 +3,5 @@
 
 // CGWindowListCreate uses a raw-pointer CFArray and is not imported into Swift.
 NSArray<NSNumber *> * _Nullable DrapletOnScreenWindowIDs(void);
+
+#import "../Vendor/Ice/PocketWindowAccess.h"

@@ -229,11 +229,16 @@ struct SettingsView: View {
             }
             permissions
             SettingsGroup("About Draplet") {
-                SettingsRow("Draplet \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")", detail: "Your menu bar, on demand. Free and open source under the MIT license.") {
+                SettingsRow("Draplet \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")", detail: "Your menu bar, on demand. Free and open source under GNU GPL v3.") {
                     Button("Quit Draplet") { NSApp.terminate(nil) }
                 }
                 GroupDivider()
-                Text("Right-side hiding and the Hidden Bar icons include work by Dwarves Foundation, under the MIT license.")
+                SettingsRow("Source and license", detail: "Source for this version, build instructions and third-party notices.") {
+                    Link("Source Code", destination: URL(string: "https://github.com/nggurbanov/Draplet")!)
+                    Link("GPL v3", destination: URL(string: "https://github.com/nggurbanov/Draplet/blob/main/LICENSE")!)
+                }
+                GroupDivider()
+                Text("Pocket includes work from Ice by Jordan Baird and contributors, under GPL v3. Right-side hiding and the Hidden Bar icons include MIT-licensed work by Dwarves Foundation.")
                     .font(.system(size: 12)).foregroundStyle(SettingsPalette.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(16)
             }
         }
@@ -267,6 +272,13 @@ struct SettingsView: View {
                 }
                 GroupDivider()
                 sideTriggerRow(.right)
+            }
+            SettingsGroup("Reveal destination") {
+                SettingsRow("Show hidden icons in", detail: "Pocket puts your icons in a grid below the menu bar, clear of the notch. Choose Menu Bar to keep the original reveal.") {
+                    Picker("Reveal destination", selection: $prefs.rightRevealMode) {
+                        ForEach(RightRevealMode.allCases, id: \.self) { Text($0.title).tag($0) }
+                    }.labelsHidden().pickerStyle(.segmented).frame(width: 220)
+                }
             }
             SettingsGroup("Auto-hide") {
                 toggleRow("Automatically hide after leaving", binding: $prefs.autoCollapse)
@@ -312,7 +324,7 @@ struct SettingsView: View {
                 else { Button("Grant Access…", action: requestPermission) }
             }
             GroupDivider()
-            SettingsRow("Background matching", detail: "Reads only the menu-bar strip locally in memory. No audio is captured.") {
+            SettingsRow("Screen capture", detail: "Matches the menu-bar background and shows real icons in Pocket. Images stay in memory; no audio is captured.") {
                 if prefs.backgroundPermission { Label("Allowed", systemImage: "checkmark").foregroundStyle(SettingsPalette.secondary) }
                 else { Button("Enable…") { MenuBarBackdrop.shared.requestPermission() } }
             }
@@ -323,7 +335,7 @@ struct SettingsView: View {
             if !prefs.permissionGranted {
                 SettingsRow("Accessibility access needed", detail: "Allow Draplet to read menu positions. It will activate when you return.") { Button("Grant Access…", action: requestPermission) }
             } else if !prefs.backgroundPermission {
-                SettingsRow("Enable background matching", detail: "macOS calls this Screen & System Audio Recording. Draplet captures no audio.") { Button("Enable…") { MenuBarBackdrop.shared.requestPermission() } }
+                SettingsRow("Enable menu-bar capture", detail: "macOS calls this Screen & System Audio Recording. Draplet captures no audio.") { Button("Enable…") { MenuBarBackdrop.shared.requestPermission() } }
             } else {
                 SettingsRow(prefs.backgroundError.isEmpty ? "Preparing the menu-bar background…" : "Background matching is unavailable", detail: prefs.backgroundError.isEmpty ? nil : prefs.backgroundError) {
                     if prefs.backgroundError.isEmpty { ProgressView().controlSize(.small) }

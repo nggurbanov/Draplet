@@ -27,8 +27,18 @@ re-granting macOS permissions; test the beta signing transition separately.
    It creates a DMG, symlink-preserving updater ZIP, SHA-256 file and candidate appcast
    in ignored `dist/`. It does not upload or publish anything.
 3. Verify the actual N→N+1 update, failure paths, mounted DMG and current app behavior.
-4. Publish the ZIP, DMG and SHA-256 file at GitHub tag `v<version>`. Verify downloads.
-5. Only then copy `dist/appcast-<version>.xml` to `updates/appcast.xml`, commit and push.
+4. Prepare and verify GPL v3 corresponding source for the exact binary build.
+   Include the matching application source, build/install scripts, vendored
+   adaptations and license notices, plus required dependency sources and build
+   instructions. Preserve the original MIT and component notices and confirm
+   the Ice revision in `Vendor/Ice/ORIGIN.md`. A dependency download URL or an
+   attribution alone is not a substitute for required corresponding source.
+   No automated corresponding-source archive generator is implemented; the
+   existing release script prepares binary artifacts only.
+5. Publish the ZIP, DMG, SHA-256 file and matching corresponding-source material
+   at GitHub tag `v<version>`. Verify the public downloads and that the source
+   actually matches the packaged build.
+6. Only then copy `dist/appcast-<version>.xml` to `updates/appcast.xml`, commit and push.
    Do not advertise an archive before its public URL works.
 
 The release signer uses the `DrapletUpdates` account in the login Keychain. Keep its
@@ -36,6 +46,13 @@ private key out of Git, shell output and CI logs. The public key in Info.plist m
 stay stable across releases. A new contributor can build the app without this key,
 but cannot publish a trusted update. Back up the signing key securely before relying
 on this feed; key rotation requires a separately tested migration.
+
+## Current acceptance boundary
+
+The local candidate is 0.5.0 build 14 with Pocket. The public v0.5.0 release
+remains a build-13 draft and the production feed is empty. Build-13 updater and
+DMG results are historical; rerun them against the final build-14 artifacts
+before publication. See [release readiness](RELEASE_READINESS.md).
 
 ## Isolated update fixture
 

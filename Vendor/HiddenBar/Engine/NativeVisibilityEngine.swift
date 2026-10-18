@@ -48,6 +48,7 @@ final class NativeVisibilityEngine: MenuBarEngine {
     // .calibrating stands for "an activation is in flight".
     private(set) var state: MenuBarEngineState = .expanded
     private(set) var layout: MenuBarLayout?
+    private(set) var layoutInventory: [MenuBarInventoryItem] = []
 
     private var assertion: NativeVisibilityAssertion?
     // Bumped whenever a pending activation must no longer win (an expand, a newer
@@ -176,6 +177,7 @@ final class NativeVisibilityEngine: MenuBarEngine {
             // A timeout or transient AX failure can yield no items. An empty
             // allow-list would hide every third-party icon, including visible ones.
             guard !inventory.isEmpty else { self.layout = nil; body(nil); return }
+            self.layoutInventory = inventory
             let layout = MenuBarLayoutResolver.resolve(inventory: inventory,
                                                        separatorFrame: boundary,
                                                        alwaysHiddenSeparatorFrame: alwaysHiddenFrame,
@@ -189,7 +191,7 @@ final class NativeVisibilityEngine: MenuBarEngine {
 
     // Activates the new restriction before dropping the old one, so switching
     // between collapsed and expanded never flashes the whole bar visible.
-    private func activate(allowing bundles: [String], completion: @escaping (Bool) -> Void) {
+    private func activate(allowing bundles: [String], onSuperseded: @escaping () -> Void = {}, completion: @escaping (Bool) -> Void) {
         generation += 1
         let generation = self.generation
         let allowed = (ownBundleIdentifier.map { [$0] } ?? []) + bundles
@@ -197,6 +199,7 @@ final class NativeVisibilityEngine: MenuBarEngine {
                             allowedBundleIdentifiers: allowed) { [weak self] result in
             guard let self = self, generation == self.generation else {
                 if case .success(let stale) = result { stale.invalidate() }
+                onSuperseded()
                 return
             }
             switch result {
@@ -211,6 +214,23 @@ final class NativeVisibilityEngine: MenuBarEngine {
                 self.releaseAssertion()
                 completion(false)
             }
+        }
+    }
+
+    // Draplet addition (2026-10-18): a temporary per-bundle exposure for the
+    // pocket. Keep the original layout and collapsed state; never classify the
+    // temporary reflow as a user rearrangement. nil restores the visible section.
+    func showPocketBundle(_ bundle: String?, completion: @escaping (Bool) -> Void) {
+        guard state == .collapsed, layout != nil else { completion(false); return }
+        showPocketBundles(bundle.map { [$0] } ?? [], completion: completion)
+    }
+
+    func showPocketBundles(_ selected: [String], completion: @escaping (Bool) -> Void) {
+        guard state == .collapsed, let layout else { completion(false); return }
+        let bundles = Array(Set(layout.bundles(in: [.visible]) + selected)).sorted()
+        activate(allowing: bundles, onSuperseded: { completion(false) }) { [weak self] success in
+            if !success { self?.state = .expanded }
+            completion(success)
         }
     }
 

@@ -13,6 +13,8 @@ Alpha downloads are not Developer ID signed or notarized.
 
 - Hide File, Edit, View and other application menus behind a left-side curtain.
 - Hide selected menu-bar icons on the right, with an optional always-hidden section.
+- Open hidden icons in an optional [Pocket grid](docs/POCKET.md), with status imagery,
+  application-artwork fallbacks and access to their native actions.
 - Reveal on hover or click, with shared or independent behavior for each side.
 - Curtain and Fade animations, plus a native Hidden Bar mode for the right side.
 - Matching or independent indicators, built-in presets and custom image import.
@@ -95,8 +97,9 @@ Do not disable Gatekeeper or other system protections globally.
 bash test.sh
 ```
 
-The current suite has 168 checks covering icon layout, preferences, rendering,
-transition cancellation, native-engine lifecycle, fullscreen detection and overlay ordering.
+The current suite has 195 checks covering icon layout, preferences, rendering,
+transition cancellation, native-engine lifecycle, fullscreen detection, overlay ordering
+and Pocket capture/action policies and spanning-grid navigation.
 Captured, minimized window-state fixtures cover the Minecraft and Fladder regressions.
 Passing these checks is not a substitute for testing gestures and fullscreen on real hardware.
 
@@ -116,12 +119,21 @@ and logs before sharing them. There is no automatic telemetry or crash-log uploa
 
 ## License and acknowledgments
 
-Draplet is [MIT licensed](LICENSE).
+Draplet is distributed under [GNU GPL version 3](LICENSE).
+Pocket includes adapted code from [Ice](https://github.com/jordanbaird/Ice) by Jordan Baird and contributors.
+Exact upstream provenance and modifications are recorded in [Vendor/Ice/ORIGIN.md](Vendor/Ice/ORIGIN.md).
+The original MIT notice for pre-GPL Draplet code is retained in `LICENSES/Draplet-original-MIT.txt`.
+When distributing binaries, provide the corresponding source for that exact build,
+including build scripts, vendored adaptations, required dependency sources and
+build instructions. See the [release checklist](docs/UPDATES.md).
 Right-side hiding includes code from [Hidden Bar](https://github.com/dwarvesf/hidden)
-by Dwarves Foundation, also under MIT. The "Hidden Bar" indicator preset retains its
+by Dwarves Foundation, under MIT. The "Hidden Bar" indicator preset retains its
 original artwork as an homage. See [ThirdPartyNotices.md](ThirdPartyNotices.md)
 and [Vendor/HiddenBar/LICENSE](Vendor/HiddenBar/LICENSE).
 In-app updates use [Sparkle](https://sparkle-project.org/); its complete license is
 included in the app as `Sparkle-LICENSE`.
 
 Resource behavior, optimization details and a repeatable CPU/memory measurement command are documented in [PERFORMANCE.md](docs/PERFORMANCE.md).
+
+Pocket’s local hardware validation covers macOS 27 on Apple silicon; its
+[compatibility limits](docs/POCKET.md#compatibility-limits) remain explicit.

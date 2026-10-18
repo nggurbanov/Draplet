@@ -22,3 +22,13 @@ for in-app updates. Sparkle is copyright the Sparkle Project contributors,
 licensed under MIT, with additional third-party notices. The complete distributed
 license is included as `Sparkle-LICENSE` in the app’s Resources. Sparkle's framework,
 installer and downloader helpers are distributed together with Draplet.
+
+# Ice
+
+Draplet Pocket adapts selected mechanisms from [Ice](https://github.com/jordanbaird/Ice),
+revision `11edd39115f3f43a83ae114b5348df6a0e1741cf`, by Jordan Baird and contributors,
+under GNU GPL version 3. See `Vendor/Ice/ORIGIN.md` for the exact source paths and
+local modifications dated 2026-10-18. The complete license is in `Vendor/Ice/LICENSE`
+and included as `Ice-LICENSE` in app Resources. Draplet as a whole is distributed
+under GPL v3; existing MIT components retain their notices. The original Draplet
+MIT notice is retained in `LICENSES/Draplet-original-MIT.txt` and the app Resources.

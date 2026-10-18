@@ -11,6 +11,7 @@ final class Preferences: ObservableObject {
     static let shared = Preferences()
     private let store: UserDefaults
     @Published var leftEnabled: Bool { didSet { save(leftEnabled, "leftEnabled") } }
+    @Published var rightRevealMode: RightRevealMode { didSet { save(rightRevealMode.rawValue, "rightRevealMode") } }
     @Published var rightEnabled: Bool { didSet { save(rightEnabled, "rightEnabled") } }
     @Published var autoCollapse: Bool { didSet { save(autoCollapse, "autoCollapse") } }
     @Published var collapseDelay: Double { didSet { save(collapseDelay, "collapseDelay") } }
@@ -46,6 +47,8 @@ final class Preferences: ObservableObject {
     var needsBackground: Bool {
         needsAccessibility && permissionGranted && (leftEnabled || (rightEnabled && animation(for: .right) != .hiddenBar))
     }
+    var needsIconCapture: Bool { needsAccessibility && rightEnabled && rightRevealMode == .pocket }
+    var needsScreenCapture: Bool { needsBackground || needsIconCapture }
     var requiresSetup: Bool { (needsAccessibility && !permissionGranted) || (needsBackground && !backgroundPermission) }
     init(store: UserDefaults = .standard) {
         self.store = store
@@ -53,6 +56,7 @@ final class Preferences: ObservableObject {
                                  "collapseDelay": 5.0, "hoverRight": false, "alwaysHidden": false,
                                  "fullWidth": false, "shortcut": 0])
         leftEnabled = store.bool(forKey: "leftEnabled")
+        rightRevealMode = RightRevealMode(rawValue: store.string(forKey: "rightRevealMode") ?? "") ?? .menuBar
         rightEnabled = store.bool(forKey: "rightEnabled")
         autoCollapse = store.bool(forKey: "autoCollapse")
         collapseDelay = store.double(forKey: "collapseDelay")
@@ -133,4 +137,9 @@ final class Preferences: ObservableObject {
 
 extension Notification.Name {
     static let drapletPreferencesChanged = Notification.Name("DrapletPreferencesChanged")
+}
+
+enum RightRevealMode: String, CaseIterable {
+    case menuBar, pocket
+    var title: String { self == .menuBar ? "Menu Bar" : "Pocket" }
 }

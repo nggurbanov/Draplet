@@ -1,6 +1,47 @@
-# Alpha release readiness — 0.5.0 (build 13)
+# Alpha release readiness — 0.5.0 (build 14)
 
-Checked on the development Mac on 2026-10-18. The public binary release remains a draft; the production update feed intentionally advertises no update yet.
+Checked on the development Mac on 2026-10-18. Build 14 is the local Pocket
+candidate. The public v0.5.0 release remains a draft containing build 13; the
+production update feed advertises no update. No build-14 binary publication or
+updater/DMG acceptance is claimed.
+
+## Build-14 local Pocket acceptance
+
+- 195 checks passed (`/tmp/Draplet-pocket-tests-final.log`), including Pocket
+  exposure/cancellation, safe geometry, image isolation, unsupported-action
+  policy, preferences and three spanning-grid navigation regressions. The
+  native build and code-signature verification passed.
+- Seven real status items and two deliberately wide QA fixtures exercised
+  notch overflow: six captured status images and three application-artwork
+  fallbacks. A real A1 cell click opened its original native fixture menu at
+  layer 101, x=648, y=34 (`.build/pocket-primary-final.log`). Earlier Shottr
+  primary/secondary native mouse-routing checks are individual-app evidence.
+- Primary AXPress addresses the original AX element without requiring a visible
+  coordinate. `cannotComplete`/timeouts are unknown outcomes and are never
+  replayed. Secondary AXShowMenu falls back to mouse routing only after a
+  definite unsupported result with a safe frame; otherwise native-bar access
+  and explanatory copy remain available.
+- Enter/Space handling belongs to the focused native cell; Refresh and Reveal
+  keep their own native actions. Arrow navigation follows actual cell spans.
+  The finish reviewer scored both keyboard source findings resolved; full
+  keyboard hardware acceptance remains unverified.
+- Captures are on demand with a two-minute in-memory cache. Pocket has no
+  persistent image timer; its 20 Hz watchdog runs only while active. A
+  10.005-second closed-Pocket sample measured 1.696% of one core, 30.75 MiB
+  footprint, 102.67 MiB RSS and 5.1 package-idle wakeups/s
+  (`.build/pocket-idle-resources.json`). This process-only diagnostic excludes
+  WindowServer and does not establish GPU, energy or battery cost.
+- Hardware scope is macOS 27 on Apple silicon. macOS 14.2–26, Intel, multiple
+  physical displays and universal third-party status-item compatibility remain
+  unvalidated. Ice’s legacy physical move-and-return machinery is not ported.
+- The whole app now uses GPL v3 with the original Draplet MIT and component
+  notices retained. Verify exact corresponding source and license resources
+  before distributing this build; see [UPDATES.md](UPDATES.md).
+
+## Historical build-13 stability and release evidence
+
+Everything below predates Pocket. The updater and mounted-DMG checks have not
+been rerun for build 14.
 
 ## Fixed during the stability pass
 

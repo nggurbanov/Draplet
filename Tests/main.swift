@@ -385,10 +385,96 @@ engine.collapse { _ in }
 reader.finish()
 bridge.finish(.failure(NSError(domain: "Test", code: 1)))
 check(engine.state == .expanded, "Activation errors fail open")
+// A pocket must borrow exposure without teaching the layout resolver that
+// temporarily reflowed icons were rearranged by the user.
+engine.collapse { _ in }; reader.finish(); bridge.finish(.success(Handle()))
+let pocketLayout = engine.layout
+var pocketSucceeded: Bool?
+engine.showPocketBundle("hidden") { pocketSucceeded = $0 }
+check(bridge.allowed.contains("hidden") && bridge.allowed.contains("visible") && bridge.allowed.contains("own"),
+      "Pocket exposes the selected bundle while preserving visible items and its own arrow")
+let pocketAssertion = Handle(); bridge.finish(.success(pocketAssertion))
+check(pocketSucceeded == true && engine.state == .collapsed && engine.layout == pocketLayout,
+      "Temporary exposure retains the collapsed state and original section arrangement")
+engine.showPocketBundle(nil) { _ in }
+check(!bridge.allowed.contains("hidden") && bridge.allowed.contains("visible"), "Closing Pocket restores the original visible section")
+bridge.finish(.success(Handle()))
+check(pocketAssertion.invalidated && reader.callback == nil, "Restoring Pocket releases its assertion without reading temporary AX positions")
+var cancelledPocket: Bool?
+engine.showPocketBundle("hidden") { cancelledPocket = $0 }
+let delayedPocket = bridge.callback
+engine.expand()
+let stalePocket = Handle(); delayedPocket?(.success(stalePocket))
+check(cancelledPocket == false && stalePocket.invalidated && engine.state == .expanded,
+      "A pending pocket exposure answers cancellation and cannot re-hide icons after pause/expand")
+engine.collapse { _ in }; reader.finish(); bridge.finish(.success(Handle()))
+engine.showPocketBundle("hidden") { _ in }; bridge.finish(.failure(NSError(domain: "PocketTest", code: 1)))
+check(engine.state == .expanded, "A failed temporary exposure releases restrictions and reports the actual expanded state")
+let pocketDisplay = CGRect(x: 0, y: 0, width: 1470, height: 956)
+let notchRight = CGRect(x: 824, y: 0, width: 646, height: 80)
+check(!PocketGeometry.isUsable(CGRect(x: 710, y: 0, width: 26, height: 33), on: pocketDisplay, rightArea: notchRight),
+      "A coordinate under the notch never receives a pocket click")
+check(!PocketGeometry.isUsable(CGRect(x: -20, y: 0, width: 26, height: 33), on: pocketDisplay, rightArea: nil),
+      "Offscreen legacy items fail open instead of clicking an unrelated app")
+check(PocketGeometry.isUsable(CGRect(x: 1200, y: 0, width: 26, height: 33), on: pocketDisplay, rightArea: notchRight),
+      "A fully visible right-side icon is safe to capture and activate")
+let placedPocket = PocketGeometry.panelFrame(anchor: CGRect(x: -3, y: 930, width: 20, height: 26), size: CGSize(width: 286, height: 380), screen: pocketDisplay, menuHeight: 33)
+check(placedPocket.minX == 8 && placedPocket.maxY < 923 && pocketDisplay.contains(placedPocket),
+      "Pocket stays below the bar and clamps to the screen edge")
+let packed = PocketLayout.rows([("a",26), ("b",26), ("wide",110), ("c",26), ("full",180)])
+check(packed.count == 3 && packed[1].map(\.span) == [2,1] && packed[2][0].span == 3,
+      "Wide status text receives spanning cells without losing icon order")
+let navigationItems: [(String, CGFloat)] = [("a", 26), ("b", 26), ("wide", 110), ("c", 26), ("full", 180)]
+check(PocketLayout.neighbor(of: "b", keyCode: 125, items: navigationItems) == "wide",
+      "Down follows the next spanning row instead of a fixed three-item offset")
+check(PocketLayout.neighbor(of: "c", keyCode: 126, items: navigationItems) == "b",
+      "Up chooses the nearest cell center in the preceding short row")
+check(PocketLayout.neighbor(of: "full", keyCode: 125, items: navigationItems) == "full" && PocketLayout.neighbor(of: "a", keyCode: 123, items: navigationItems) == "a",
+      "Grid keyboard navigation stops at outer edges")
+let captureBatches = PocketLayout.batches([("a", "same", 26), ("b", "other", 26), ("c", "same", 26), ("d", "last", 110)], widthLimit: 150)
+check(captureBatches == [["a", "c", "b"], ["d"]], "Capture batches keep bundle siblings together and respect the available band")
+check(PocketLayout.rows([("huge", CGFloat.greatestFiniteMagnitude)])[0][0].span == 3,
+      "Untrusted AX widths are clamped before integer conversion")
+func pocketPixelImage(_ pixels: [UInt8]) -> CGImage {
+    CGImage(width: 3, height: 3, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: 12,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+            provider: CGDataProvider(data: Data(pixels) as CFData)!, decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
+}
+var pocketPixels = [UInt8](repeating: 0, count: 36)
+for i in stride(from: 3, to: 36, by: 4) { pocketPixels[i] = 255 }
+check(PocketImage.isolate(pocketPixelImage(pocketPixels)) == nil, "A blank native snapshot is not presented as an available icon")
+for i in [12,16] { pocketPixels[i] = 255; pocketPixels[i+1] = 255; pocketPixels[i+2] = 255 }
+let isolatedPocket = PocketImage.isolate(pocketPixelImage(pocketPixels))!
+let pocketData = isolatedPocket.dataProvider!.data!
+let pocketBytes = CFDataGetBytePtr(pocketData)!
+check(pocketBytes[3] == 0 && pocketBytes[15] == 255 && PocketImage.isMonochrome(isolatedPocket),
+      "Icon extraction removes a black native background while preserving template glyphs")
+var transparentPocket = pocketPixels
+for i in [0,4,8,20,24,28,32] { for c in 0..<4 { transparentPocket[i+c] = 0 } }
+check(PocketImage.isolate(pocketPixelImage(transparentPocket)) != nil,
+      "Already transparent Ice window captures retain their original silhouette")
+invalidPrefs.rightRevealMode = .pocket
+check(!invalidPrefs.requiresSetup && invalidPrefs.needsIconCapture && !invalidPrefs.needsBackground,
+      "Pocket can use app artwork without forcing screen-capture permission in right-only Hidden Bar mode")
+let pocketSource = CGEventSource(stateID: .privateState)!
+let pocketEvent = PocketItemEvents.event(type: .rightMouseUp, point: CGPoint(x: 1200, y: 16), windowID: 77, pid: 55, button: .right, source: pocketSource)!
+check(pocketEvent.type == .rightMouseUp && pocketEvent.flags.isEmpty && pocketEvent.getIntegerValueField(.eventTargetUnixProcessID) == 55 && pocketEvent.getIntegerValueField(.mouseEventWindowUnderMousePointer) == 77,
+      "Ice-derived native clicks retain the target window and never inherit Command-drag flags")
+check(!PocketActionPolicy.shouldUseMouse(after: .cannotComplete) && !PocketActionPolicy.shouldUseMouse(after: .success),
+      "A timed-out or accepted AX action is never replayed as another click")
+check(PocketActionPolicy.shouldUseMouse(after: .actionUnsupported) && !PocketActionPolicy.shouldUseMouse(after: .apiDisabled),
+      "Only unsupported AX actions can use verified mouse routing; permission failure cannot")
+check(!PocketActionPolicy.shouldDismiss(for: 10, origin: 10, target: nil, own: 20) && !PocketActionPolicy.shouldDismiss(for: 20, origin: 10, target: nil, own: 20),
+      "Repeated foreground/own-app activation does not dismiss a nonactivating pocket")
+check(PocketActionPolicy.shouldDismiss(for: 30, origin: 10, target: nil, own: 20) && !PocketActionPolicy.shouldDismiss(for: 30, origin: 10, target: 30, own: 20),
+      "Changing to another app dismisses Pocket, while its selected native action may activate its owner")
 let suite = "Draplet.Tests.\(UUID().uuidString)"
 let store = UserDefaults(suiteName: suite)!
 defer { store.removePersistentDomain(forName: suite) }
 let prefs = Preferences(store: store)
+check(prefs.rightRevealMode == .menuBar, "Existing users keep the original menu-bar reveal until Pocket is selected")
+prefs.rightRevealMode = .pocket
+check(Preferences(store: store).rightRevealMode == .pocket, "Pocket selection survives restart")
 check(prefs.backgroundMode == .cached, "Static backgrounds use a one-shot cache by default")
 prefs.backgroundMode = .live
 check(Preferences(store: store).backgroundMode == .live, "Animated-wallpaper mode survives a restart")

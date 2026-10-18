@@ -11,6 +11,9 @@ A daily-use, free and open-source menu-bar utility. Hide application menu headin
 ## Capabilities and constraints
 Preserve independent/shared icons, custom image import, hover/click reveal, Curtain/Fade and right-only native Hidden Bar animations, both animation paces, automatic right-side hiding, always-hidden section, extra room option, global shortcut and login registration. Preserve Accessibility and screen-capture permission guidance, cached/live background matching and graceful failure. The native hiding/reveal engines and recent rapid-toggle flash fixes are working behavior, not a redesign target.
 
+## Pocket
+User approved an optional grid popover for hidden right-side icons and reusing Ice code under GNU GPL v3. Preserve the original Menu Bar destination and both-sides reveal shortcut. The pocket inherits native warm surfaces, real status imagery, usable full-cell click targets and keyboard dismissal. No continuous capture solely for Pocket; retain presentation suppression and existing layout. See docs/POCKET.md for compatibility limits.
+
 ## Brand commitments
 Draplet variant E: asymmetric terracotta curtain on the left, two ivory rings on a chocolate rail and three exposed chocolate dots. Production artwork lives under Resources/Brand and Resources/Installer. Settings concepts establish warm ivory/charcoal surfaces, restrained terracotta accents, native controls and compact navigation. User explicitly clarified that their exact layout is not binding; choose the best actual UI/UX patterns using Impeccable.
 

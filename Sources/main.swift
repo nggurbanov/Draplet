@@ -150,7 +150,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         right.tick()
     }
     @objc func togglePause() { prefs.paused.toggle(); applyPreferences() }
-    @objc func revealBoth() { right.expand(all: true) { [weak self] in self?.left.revealForShortcut() } }
+    @objc func revealBoth() {
+        if prefs.rightRevealMode == .pocket && right.canManage { left.revealForShortcut(); right.showPocket(all: true) }
+        else { right.expand(all: true) { [weak self] in self?.left.revealForShortcut() } }
+    }
     func previewAnimations() {
         previewGeneration += 1; let token = previewGeneration
         left.manualUntil = Date().addingTimeInterval(5)
@@ -270,7 +273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             "systemPresentationSuspended": MenuBarBackdrop.shared.systemPresentationSuspended,
                             "presentationSuppressed": MenuBarBackdrop.shared.presentationSuppressed,
                             "nativeFullscreen": ForegroundFullscreen.shared.isFullscreen,
-                            "rightAnimation": self.right.animationStatus,
+                            "rightAnimation": self.right.animationStatus, "pocket": self.right.pocketStatus, "rightRevealMode": self.prefs.rightRevealMode.rawValue,
                             "hitWindow": self.left.clickPanel?.windowNumber ?? 0,
                             "hitVisible": self.left.clickPanel?.isVisible ?? false,
                             "leftArrowFrame": self.left.frameJSON(self.left.clickPanel?.frame ?? .zero),
@@ -287,15 +290,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         let data = try! JSONSerialization.data(withJSONObject: status, options: .sortedKeys)
                         print(String(decoding: data, as: UTF8.self)); fflush(stdout)
                     case "capture-failure": MenuBarBackdrop.shared.fail("Injected transient capture interruption (QA)")
+                    case "pocket": self.prefs.rightRevealMode = .pocket; self.right.showPocket()
+                    case "pocket-toggle": self.right.togglePocket()
+                    case "menu-bar": self.prefs.rightRevealMode = .menuBar
                     case "right-click": self.right.toggleItem.button?.performClick(nil)
                     case "expand": self.right.expand()
                     case "collapse": self.right.collapse()
                     case "reveal": self.revealBoth()
                     case "settings": self.settings.show()
                     case "settings-close": self.settings.window?.close()
-                    case "appearance-light": self.settings.window?.appearance = NSAppearance(named: .aqua)
-                    case "appearance-dark": self.settings.window?.appearance = NSAppearance(named: .darkAqua)
-                    case "appearance-system": self.settings.window?.appearance = nil
+                    case "appearance-light": self.settings.window?.appearance = NSAppearance(named: .aqua); self.right.setPocketAppearance(NSAppearance(named: .aqua))
+                    case "appearance-dark": self.settings.window?.appearance = NSAppearance(named: .darkAqua); self.right.setPocketAppearance(NSAppearance(named: .darkAqua))
+                    case "appearance-system": self.settings.window?.appearance = nil; self.right.setPocketAppearance(nil)
                     case "left-toggle": self.left.indicatorClicked()
                     case "preview": self.previewAnimations()
                     case "pace-a": self.prefs.animationPace = .originalLeft
@@ -317,7 +323,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         self.prefs.sharedIcon = .chevron; self.prefs.leftIcon = .chevron; self.prefs.rightIcon = .chevron; self.prefs.sameIcons = true
                     case "pause": self.togglePause()
                     case "quit": NSApp.terminate(nil)
-                    default: break
+                    default:
+                        if line.hasPrefix("pocket-left:") { self.right.activatePocketItem(String(line.dropFirst(12)), button: .left) }
+                        if line.hasPrefix("pocket-right:") { self.right.activatePocketItem(String(line.dropFirst(13)), button: .right) }
                     }
                 }
             }
