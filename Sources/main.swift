@@ -25,6 +25,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             exit(0)
         }
         makeMenus()
+        AppUpdater.shared.start()
+        // Packaging-only fixtures exercise the actual updater without starting
+        // menu-bar engines or asking for hardware permissions.
+        if Bundle.main.object(forInfoDictionaryKey: "DrapletUpdateTest") as? Bool == true {
+            settings = SettingsController(prefs: prefs, requestPermission: {}, replaceHiddenBar: {},
+                                          revealBoth: {}, pause: {}, previewAnimations: {})
+            settings.show()
+            if CommandLine.arguments.contains("--test-controls") { testControls() }
+            return
+        }
         right = RightCurtain()
         settings = SettingsController(prefs: prefs, requestPermission: { [weak self] in self?.requestPermission() },
                                       replaceHiddenBar: { [weak self] in self?.right.replaceHiddenBar() },
@@ -148,7 +158,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
     }
-    @objc func showSettings() { settings.show() }
+    @objc func showSettings() { settings?.show() }
+    @objc func checkForUpdates() { AppUpdater.shared.check() }
     func requestPermission() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
@@ -160,6 +171,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu(title: "Draplet")
         let settings = menu.addItem(withTitle: "Draplet Settings…", action: #selector(showSettings), keyEquivalent: ",")
         settings.target = self
+        let updates = menu.addItem(withTitle: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        updates.target = self
         menu.addItem(.separator())
         menu.addItem(withTitle: "Quit Draplet", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.submenu = menu
@@ -187,12 +200,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let result = RegisterEventHotKey(key, UInt32(controlKey | optionKey), EventHotKeyID(signature: 0x44524150, id: 1), GetApplicationEventTarget(), 0, &hotkey)
         if result != noErr { prefs.error = "The reveal shortcut is already in use. Choose another in General." }
     }
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { settings.show(); return true }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { settings?.show(); return true }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        // Let AppKit finish termination so Sparkle can install a staged update.
+        // Cleanup stays idempotent and releases all native assertions.
         cleanup()
-        // A utility owns no documents. Exit after releasing all native assertions;
-        // this also avoids AppKit's termination negotiation hanging in menu tracking.
-        DispatchQueue.main.async { exit(0) }
         return .terminateNow
     }
     func applicationWillTerminate(_ notification: Notification) { cleanup() }
@@ -209,9 +221,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         NSLog("Draplet cleanup complete")
     }
+    private static func readControlLine() -> String? {
+        // Swift readLine holds stdin's stdio lock while waiting. Foundation's
+        // XML parser also asks for that lock, deadlocking Sparkle in test mode.
+        var bytes: [UInt8] = []
+        var byte: UInt8 = 0
+        while read(STDIN_FILENO, &byte, 1) == 1 {
+            if byte == 10 { return String(decoding: bytes, as: UTF8.self) }
+            bytes.append(byte)
+        }
+        return bytes.isEmpty ? nil : String(decoding: bytes, as: UTF8.self)
+    }
     private func testControls() {
         Thread.detachNewThread { [weak self] in
-            while let line = readLine() {
+            while let line = Self.readControlLine() {
                 DispatchQueue.main.async {
                     guard let self else { return }
                     switch line {

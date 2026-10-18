@@ -516,6 +516,20 @@ visualCover.finish(); visualEngine.finish(.collapsed); runScheduled(RightMenuTra
 transitions.cancelAndExpand()
 check(!visualCover.isVisible && visualEngine.state == .expanded,
       "Pausing or reconfiguring still removes a retained closed curtain and releases native hiding")
+// Reminder deferral survives restarts, but never suppresses a newer build.
+let reminderNow = Date(timeIntervalSince1970: 1_800_000_000)
+var reminder = UpdateReminderPolicy()
+check(!reminder.isDue(at: reminderNow, presentationSuppressed: false), "No reminder without a staged version")
+reminder.receive("11")
+check(reminder.isDue(at: reminderNow, presentationSuppressed: false), "A staged update prompts immediately")
+check(!reminder.isDue(at: reminderNow, presentationSuppressed: true), "Fullscreen and overview defer update prompts")
+reminder.deferOneHour(from: reminderNow)
+check(!reminder.isDue(at: reminderNow.addingTimeInterval(3599), presentationSuppressed: false), "Remind later means a full hour")
+check(reminder.isDue(at: reminderNow.addingTimeInterval(3600), presentationSuppressed: false), "Reminder becomes due at one hour")
+reminder.receive("11")
+check(reminder.deferredUntil != nil, "Resuming the same update preserves deferral")
+reminder.receive("12")
+check(reminder.isDue(at: reminderNow, presentationSuppressed: false), "A newer build gets its own prompt")
 // Exercise the real Settings window, including delegate delivery on close.
 // Keep it offscreen so the test does not put a second Settings window on the desktop.
 let settings = SettingsController(prefs: prefs, requestPermission: {}, replaceHiddenBar: {},

@@ -14,3 +14,11 @@ The menu-bar hiding framework used on macOS 27 is private and dynamically
 resolved. If it is unavailable, Draplet leaves the icons visible. Restrictions
 are released when Draplet quits or its process exits. No assessment session,
 keyboard lock, or other system restriction is activated.
+
+# Sparkle
+
+Draplet includes [Sparkle 2.10.0](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0)
+for in-app updates. Sparkle is copyright the Sparkle Project contributors,
+licensed under MIT, with additional third-party notices. The complete distributed
+license is included as `Sparkle-LICENSE` in the app’s Resources. Sparkle's framework,
+installer and downloader helpers are distributed together with Draplet.

@@ -6,8 +6,8 @@ A free, open-source macOS utility that keeps both sides of your menu bar tidy.
 Hide application menus on the left and selected status icons on the right,
 then reveal them with a click, a hover, or a keyboard shortcut.
 
-**Early alpha.** Draplet is changing quickly. The current version is 0.4.4.
-In-app updates are in development and are not included in this version yet.
+**Early alpha.** Draplet is changing quickly. The current version is 0.5.0.
+Alpha downloads are not Developer ID signed or notarized.
 
 ## Features
 
@@ -19,11 +19,13 @@ In-app updates are in development and are not included in this version yet.
 - Cached background matching, or optional Live matching for animated wallpapers.
 - A configurable reveal shortcut, auto-hide delay and optional launch at login.
 - Native Settings with light and dark appearances. A Dock icon appears while Settings is open.
+- Signed in-app updates: automatic checks, background downloads and installation on quit.
 
 ## Requirements and current limits
 
-- macOS 14 or later. The current development build is tested on macOS 27 with Apple silicon;
+- macOS 14.2 or later. The current development build is tested on macOS 27 with Apple silicon;
   other supported OS versions and Intel Macs still need hardware validation.
+  Binary artifacts prepared on Apple silicon are arm64; Intel users must build locally.
 - Accessibility access reads menu positions and fullscreen window state.
 - Background matching requires Screen & System Audio Recording permission.
   Draplet captures no audio; the menu-bar background is processed locally in memory.
@@ -47,6 +49,7 @@ open /Applications/Draplet.app
 
 The build uses an available Apple Development signing identity, or ad-hoc signing
 if none is available. You can select an identity with `DRAPLET_SIGNING_IDENTITY`.
+Set `DRAPLET_SIGNING_IDENTITY=-` explicitly for an ad-hoc alpha build.
 Public Developer ID signing and notarization are not configured yet.
 
 Enable Draplet in System Settings → Privacy & Security → Accessibility and
@@ -58,6 +61,17 @@ section, place its dotted divider to the left of the arrow. ⌥-click reveals al
 
 The default shortcut is ⌃⌥Space. Settings provides alternatives.
 Quit Hidden Bar before using Draplet's right-side hiding; both manage the same icons.
+
+## Updates
+
+Draplet checks at launch and hourly by default. Downloaded updates install when you
+quit Draplet; **Update and Relaunch** installs immediately. Ready updates stay visible
+in Settings, with a reminder that can be deferred for an hour. Reminders wait while
+you are in fullscreen or Mission Control. Automatic checks and background downloads
+can be turned off in General. There is one update feed, with no channels.
+
+Version 0.4.4 and earlier need one manual upgrade to get the updater.
+See [update and release documentation](docs/UPDATES.md) for signing and local validation.
 
 ## Create a local DMG
 
@@ -78,7 +92,7 @@ Do not disable Gatekeeper or other system protections globally.
 bash test.sh
 ```
 
-The current suite has 117 checks covering icon layout, preferences, rendering,
+The current suite has 124 checks covering icon layout, preferences, rendering,
 transition cancellation, native-engine lifecycle, fullscreen detection and overlay ordering.
 Captured, minimized window-state fixtures cover the Minecraft and Fladder regressions.
 Passing these checks is not a substitute for testing gestures and fullscreen on real hardware.
@@ -104,3 +118,5 @@ Right-side hiding includes code from [Hidden Bar](https://github.com/dwarvesf/hi
 by Dwarves Foundation, also under MIT. The "Hidden Bar" indicator preset retains its
 original artwork as an homage. See [ThirdPartyNotices.md](ThirdPartyNotices.md)
 and [Vendor/HiddenBar/LICENSE](Vendor/HiddenBar/LICENSE).
+In-app updates use [Sparkle](https://sparkle-project.org/); its complete license is
+included in the app as `Sparkle-LICENSE`.

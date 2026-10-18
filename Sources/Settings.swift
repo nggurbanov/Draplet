@@ -85,6 +85,7 @@ private struct GroupDivider: View {
 }
 
 struct SettingsView: View {
+    @ObservedObject private var updates = AppUpdater.shared
     @ObservedObject var prefs: Preferences
     @ObservedObject var navigation: SettingsNavigation
     let requestPermission: () -> Void
@@ -97,6 +98,18 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     Text(navigation.page.rawValue).font(.system(size: 25, weight: .bold)).padding(.bottom, 1)
+                    if let version = updates.readyVersion {
+                        HStack(spacing: 12) {
+                            Image(systemName: "arrow.down.circle").font(.title2).foregroundStyle(SettingsPalette.accent)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Draplet \(version) is ready").fontWeight(.semibold)
+                                Text("Installs when you quit Draplet. Update now to get the latest fixes.")
+                                    .font(.system(size: 12)).foregroundStyle(SettingsPalette.secondary)
+                            }
+                            Spacer()
+                            Button("Update and Relaunch") { updates.installNow() }
+                        }.padding(16).background(SettingsPalette.surface, in: RoundedRectangle(cornerRadius: 9))
+                    }
                     if prefs.paused {
                         HStack(spacing: 12) {
                             Image(systemName: "pause.circle").font(.title2).foregroundStyle(SettingsPalette.accent)
@@ -200,6 +213,20 @@ struct SettingsView: View {
                         Button("Right…") { navigation.page = .right }
                     }
                 }
+            }
+            SettingsGroup("Updates") {
+                SettingsRow("Draplet \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")", detail: updates.status) {
+                    Button(updates.readyVersion == nil ? "Check for Updates…" : "Update and Relaunch") {
+                        if updates.readyVersion != nil { updates.installNow() } else { updates.check() }
+                    }.disabled(updates.readyVersion == nil && !updates.canCheck)
+                }
+                GroupDivider()
+                toggleRow("Automatically check for updates", detail: "Checks at launch and every hour.",
+                          binding: Binding(get: { updates.automaticChecks }, set: updates.setAutomaticChecks))
+                GroupDivider()
+                toggleRow("Download updates in the background", detail: "Downloaded updates install when you quit Draplet. You can also update and relaunch immediately.",
+                          binding: Binding(get: { updates.automaticDownloads }, set: updates.setAutomaticDownloads))
+                    .disabled(!updates.automaticChecks)
             }
             permissions
             SettingsGroup("About Draplet") {
