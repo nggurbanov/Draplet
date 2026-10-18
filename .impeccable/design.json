@@ -242,7 +242,7 @@
   "components": [],
   "narrative": {
     "northStar": "A quiet daily macOS utility",
-    "overview": "Warm ivory and charcoal surfaces carry compact, familiar controls. The approved variant E artwork owns the brand: an asymmetric terracotta curtain, two ivory rings on a chocolate rail and three exposed chocolate dots. Its texture belongs in the icon and installer artwork; Settings use native AppKit chrome and SwiftUI controls.\n\nThe approved PNGs under `../art/draplet-e` establish palette and character. The user explicitly loosened exact layout fidelity and delegated effective native UI/UX to Impeccable. They are style references for Settings, not a composition or state-fidelity contract.",
+    "overview": "Warm ivory and charcoal surfaces carry compact, familiar controls. The approved variant E artwork owns the brand: an asymmetric terracotta curtain, two ivory rings on a chocolate rail and three exposed chocolate dots. Its texture belongs in the icon and installer artwork; Settings use native AppKit chrome and SwiftUI controls.\n\nThe approved PNGs under `Resources/Brand` and `Resources/Installer` establish palette and character. The user explicitly loosened exact layout fidelity and delegated effective native UI/UX to Impeccable. They are style references for Settings, not a composition or state-fidelity contract.",
     "keyCharacteristics": [
       "Warm, restrained and compact.",
       "Native controls and standard macOS window behavior.",

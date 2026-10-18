@@ -2,3 +2,14 @@
 .DS_Store
 dist/
 .impeccable/review/
+
+# Local credentials and signing material
+.env
+.env.*
+*.p12
+*.pfx
+*.p8
+*.key
+*.cer
+*.mobileprovision
+*.provisionprofile

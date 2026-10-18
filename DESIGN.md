@@ -64,7 +64,7 @@ components:
 
 Warm ivory and charcoal surfaces carry compact, familiar controls. The approved variant E artwork owns the brand: an asymmetric terracotta curtain, two ivory rings on a chocolate rail and three exposed chocolate dots. Its texture belongs in the icon and installer artwork; Settings use native AppKit chrome and SwiftUI controls.
 
-The approved PNGs under `../art/draplet-e` establish palette and character. The user explicitly loosened exact layout fidelity and delegated effective native UI/UX to Impeccable. They are style references for Settings, not a composition or state-fidelity contract.
+Production PNGs under `Resources/Brand` and installer artwork under `Resources/Installer` establish palette and character. The user explicitly loosened exact layout fidelity and delegated effective native UI/UX to Impeccable. They are style references for Settings, not a composition or state-fidelity contract.
 
 **Key Characteristics:**
 
@@ -149,7 +149,7 @@ Permission rows show actual state and recovery actions. Background preparation a
 
 ### Delivery artwork and review
 
-The icon and drag-to-Applications installer retain approved variant E. Final native captures are `.impeccable/review/appearance-dark-final.png`, `.impeccable/review/appearance-light-final.png` and `.impeccable/review/installer.png`.
+The icon and drag-to-Applications installer retain approved variant E. Native review captures are local artifacts under `.impeccable/review/` and are not included in the source distribution.
 
 **Reviewer disposition: SHIP.** The final captures show the implemented light/dark palette, clear selection and the intended installer arrangement. The implementation review records 69 passing checks plus native source/screenshot and manual settings validation for linked/independent choices, custom icon import/removal, the slider and Pause/Resume. The HTML/CSS detector was not run because this is native SwiftUI/AppKit. This disposition covers the reviewed local Settings/icon/installer work; it does not claim a public release, paid signing or notarization.
 
