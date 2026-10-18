@@ -23,8 +23,16 @@ struct NativeBarTreatment {
         var rows = [UInt8](repeating: 0, count: height * 4)
         for y in 0..<height {
             for channel in 0..<4 {
-                let values = stride(from: 0, to: width, by: 4).map { pixels[(y * width + $0) * 4 + channel] }.sorted()
-                rows[y * 4 + channel] = values[values.count / 2]
+                var histogram = [Int](repeating: 0, count: 256)
+                for x in stride(from: 0, to: width, by: 4) {
+                    histogram[Int(pixels[(y * width + x) * 4 + channel])] += 1
+                }
+                let middle = ((width + 3) / 4) / 2
+                var count = 0
+                for value in 0..<256 {
+                    count += histogram[value]
+                    if count > middle { rows[y * 4 + channel] = UInt8(value); break }
+                }
             }
         }
         guard let provider = CGDataProvider(data: Data(rows) as CFData),
@@ -36,8 +44,8 @@ struct NativeBarTreatment {
         // reveal the OS-selected light/dark foreground independently of theme.
         let scale = Double(width) / max(1, Double(logicalWidth))
         var candidates: [(Int, Double)] = []
-        for y in max(0, Int(5 * scale))..<min(height, Int(28 * scale)) {
-            for x in max(0, Int(16 * scale))..<min(width, Int(35 * scale)) {
+        for y in min(height, max(0, Int(5 * scale)))..<min(height, Int(28 * scale)) {
+            for x in min(width, max(0, Int(16 * scale)))..<min(width, Int(35 * scale)) {
                 let i = (y * width + x) * 4, alpha = Int(pixels[i + 3])
                 guard alpha > 160 else { continue }
                 let difference = (0..<4).map { abs(Int(pixels[i + $0]) - Int(rows[y * 4 + $0])) }.max() ?? 0
@@ -126,14 +134,10 @@ struct BackdropScene: Equatable {
         let display = CGDisplayBounds(CGMainDisplayID())
         let height = max(NSStatusBar.system.thickness, NSScreen.screens.first?.safeAreaInsets.top ?? 0)
         let band = CGRect(x: display.minX, y: display.minY, width: display.width, height: height)
-        let rows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
-        let windows = rows.compactMap { row -> Window? in
-            guard let rect = row[kCGWindowBounds as String] as? [String: Any],
-                  let frame = CGRect(dictionaryRepresentation: rect as CFDictionary) else { return nil }
-            return Window(number: row[kCGWindowNumber as String] as? Int ?? 0,
-                          layer: row[kCGWindowLayer as String] as? Int ?? 0, frame: frame)
+        let windows = WindowServerSnapshot.shared.current(freshGeometry: true).map {
+            Window(number: $0.number, layer: $0.layer, frame: $0.frame)
         }
-        return Self(frontPID: NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0, windows: windows, band: band)
+        return Self(frontPID: ForegroundApplication.shared.current()?.pid ?? 0, windows: windows, band: band)
     }
 }
 
@@ -156,9 +160,11 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var awaitingDesktopAfterPresentation = false
     private var nativeRecovery = NativeBarRecovery()
     private var presentationMonitor: Timer?
+    var onPresentationTick: (() -> Void)?
     var streaming: Bool { stream != nil }
     private var cleanImage: CGImage?
     private var composedImage: CGImage?
+    private var composedDrawing: NSImage?
     private var treatment: NativeBarTreatment?
     private var stream: SCStream?
     private var nativeWindow: SCWindow?
@@ -177,8 +183,10 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var recovery = CaptureRetryPolicy()
     private var active = false
     private var generation = 0
-    private let imageContext = CIContext(options: [.cacheIntermediates: false])
-    private let captureQueue = DispatchQueue(label: "Draplet.MenuBarBackground", qos: .userInitiated)
+    // Capture-queue confined and released when capture stops.
+    private var imageContext: CIContext?
+    private var frameDelivery = FrameDeliveryGate()
+    private let captureQueue = DispatchQueue(label: "Draplet.MenuBarBackground", qos: .userInitiated, autoreleaseFrequency: .workItem)
     private var queuedStreamID: ObjectIdentifier?
     private var singleFrameCapture = false
     private var captureNeedsDesktop = true
@@ -239,7 +247,7 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                     self.stream = capture
                     let captureID = ObjectIdentifier(capture)
                     self.captureQueue.async { [self] in
-                        self.queuedStreamID = captureID; self.lastFingerprint = nil; self.singleFrameCapture = false
+                        self.queuedStreamID = captureID; self.frameDelivery.reset(); self.lastFingerprint = nil; self.singleFrameCapture = false
                     }
                     try await capture.startCapture()
                     guard token == self.generation else { try? await capture.stopCapture(); return }
@@ -274,7 +282,11 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     }
     private func watchSystemPresentation() {
         guard presentationMonitor == nil else { return }
-        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in _ = self?.checkSystemPresentation() }
+        let timer = Timer(timeInterval: 0.05, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.checkSystemPresentation()
+            self.onPresentationTick?()
+        }
         presentationMonitor = timer; RunLoop.main.add(timer, forMode: .common)
     }
     @discardableResult private func checkSystemPresentation() -> Bool {
@@ -353,7 +365,7 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 self.stream = capture
                 let captureID = ObjectIdentifier(capture)
                 self.captureQueue.async { [self] in
-                    self.queuedStreamID = captureID; self.lastFingerprint = nil; self.singleFrameCapture = true
+                    self.queuedStreamID = captureID; self.frameDelivery.reset(); self.lastFingerprint = nil; self.singleFrameCapture = true
                 }
                 try await capture.startCapture()
                 guard token == self.generation else { try? await capture.stopCapture(); return }
@@ -417,6 +429,9 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
               let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false) as? [[SCStreamFrameInfo: Any]],
               let status = attachments.first?[.status] as? Int, SCFrameStatus(rawValue: status) == .complete,
               let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        guard let delivery = frameDelivery.begin() else { return }
+        var delivered = false
+        defer { if !delivered { frameDelivery.finish(delivery) } }
         CVPixelBufferLockBaseAddress(buffer, .readOnly)
         var fingerprint: UInt64 = 1469598103934665603
         if let base = CVPixelBufferGetBaseAddress(buffer) {
@@ -432,14 +447,18 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         guard fingerprint != lastFingerprint else { return }
         lastFingerprint = fingerprint
         let image = CIImage(cvPixelBuffer: buffer)
-        guard let cgImage = imageContext.createCGImage(image, from: image.extent) else { return }
+        if imageContext == nil { imageContext = CIContext(options: [.cacheIntermediates: false]) }
+        guard let cgImage = imageContext?.createCGImage(image, from: image.extent) else { return }
+        delivered = true
         DispatchQueue.main.async { [weak self, weak stream] in
-            guard let self, let stream, self.stream === stream, self.active, self.acceptsCapture() else { return }
+            guard let self else { return }
+            defer { self.captureQueue.async { self.frameDelivery.finish(delivery) } }
+            guard let stream, self.stream === stream, self.active, self.acceptsCapture() else { return }
             if self.mode == .cached {
                 guard self.desktopInFlight else { return }
                 self.desktopInFlight = false; self.snapshotCount += 1
                 self.stream = nil
-                self.captureQueue.async { [self] in self.singleFrameCapture = false }
+                self.captureQueue.async { [self] in self.singleFrameCapture = false; self.queuedStreamID = nil; self.imageContext?.clearCaches(); self.imageContext = nil }
                 Task { try? await stream.stopCapture() }
             } else { self.frameCount += 1 }
             self.cleanImage = cgImage
@@ -487,7 +506,8 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             context.draw(cleanImage, in: rect); context.draw(treatment.image, in: rect)
             composedImage = context.makeImage()
         }
-        guard composedImage != nil else { return }
+        guard let composedImage else { return }
+        composedDrawing = NSImage(cgImage: composedImage, size: screenFrame.size)
         recovery.reset()
         setReady(true)
         if presentationSuppressed && !systemPresentationSuspended {
@@ -501,10 +521,9 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         NotificationCenter.default.post(name: Self.didChange, object: nil)
     }
     func draw(in bounds: NSRect, screenRect: NSRect, operation: NSCompositingOperation = .sourceOver) {
-        guard let composedImage, ready else { NSColor.windowBackgroundColor.setFill(); bounds.fill(using: operation); return }
+        guard let combined = composedDrawing, ready else { NSColor.windowBackgroundColor.setFill(); bounds.fill(using: operation); return }
         NSGraphicsContext.saveGraphicsState(); bounds.clip()
         NSGraphicsContext.current?.imageInterpolation = .none
-        let combined = NSImage(cgImage: composedImage, size: screenFrame.size)
         let source = NSRect(x: screenRect.minX - screenFrame.minX, y: screenRect.minY - screenFrame.minY,
                             width: screenRect.width, height: screenRect.height)
         combined.draw(in: bounds, from: source, operation: operation, fraction: 1)
@@ -530,6 +549,10 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         generation += 1; active = false; nativeInFlight = false; desktopInFlight = false; refreshAgain = false; filterUpdateInFlight = false
         pendingRefresh?.cancel(); pendingRefresh = nil
         monitor?.invalidate(); monitor = nil; nativeRefresh?.invalidate(); nativeRefresh = nil
+        captureQueue.async { [self] in
+            queuedStreamID = nil; frameDelivery.reset()
+            imageContext?.clearCaches(); imageContext = nil
+        }
         let capture = stream; stream = nil
         if let capture { Task { try? await capture.stopCapture() } }
         nativeWindow = nil; desktopFilter = nil; desktopConfig = nil
@@ -539,7 +562,7 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             awaitingNativeAfterPresentation = false; awaitingDesktopAfterPresentation = false
             nativeRecovery = NativeBarRecovery()
             presentationMonitor?.invalidate(); presentationMonitor = nil
-            cleanImage = nil; composedImage = nil; treatment = nil; setReady(false)
+            cleanImage = nil; composedImage = nil; composedDrawing = nil; treatment = nil; setReady(false)
         }
     }
     func restart() { let selectedMode = mode; failure = nil; stop(); start(mode: selectedMode) }

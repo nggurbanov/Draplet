@@ -4,18 +4,36 @@ import AppKit
 // both AppKit visibility APIs still report a normal menu bar. Native fullscreen
 // apps can do the same, so combine window geometry with their focused AX window.
 // This uses existing Accessibility access, without pixel capture.
+final class PresentationOptionsCache {
+    private let read: () -> NSApplication.PresentationOptions
+    private var pid: pid_t = -1
+    private var sampledAt = -Double.infinity
+    private var value: NSApplication.PresentationOptions = []
+    init(read: @escaping () -> NSApplication.PresentationOptions = { NSApp.currentSystemPresentationOptions }) { self.read = read }
+    func current(pid: pid_t, at time: TimeInterval = ProcessInfo.processInfo.systemUptime) -> NSApplication.PresentationOptions {
+        if self.pid != pid || time - sampledAt >= 0.25 {
+            self.pid = pid; sampledAt = time; value = read()
+        }
+        return value
+    }
+    func invalidate() { sampledAt = -Double.infinity }
+}
+
 enum SystemPresentation {
+    private static let options = PresentationOptionsCache()
+    static func invalidateOptions() { options.invalidate() }
     private static var dockPID: pid_t?
     static func forgetDock(pid: pid_t) { if dockPID == pid { dockPID = nil } }
     private static var geometry: (displays: [CGRect], menuBar: CGRect)?
-    static func invalidateDisplays() { geometry = nil }
+    static func invalidateDisplays() { geometry = nil; WindowServerSnapshot.shared.invalidate() }
     static func current() -> Bool {
-        let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
+        let frontPID = ForegroundApplication.shared.current()?.pid ?? 0
         let nativeFullscreen = ForegroundFullscreen.shared.current(pid: frontPID)
+        if nativeFullscreen { return true }
         if dockPID == nil {
             dockPID = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first?.processIdentifier
         }
-        let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
+        let windows = WindowServerSnapshot.shared.current()
         if geometry == nil {
             let displays = NSScreen.screens.compactMap { screen in
                 (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)
@@ -24,40 +42,38 @@ enum SystemPresentation {
             geometry = (displays, CGDisplayBounds(CGMainDisplayID()))
         }
         let geometry = geometry!
-        return isActive(windows: windows, dockPID: dockPID ?? -1,
+        return isActive(records: windows, dockPID: dockPID ?? -1,
                         frontPID: frontPID,
                         displays: geometry.displays, menuBarDisplay: geometry.menuBar,
-                        options: NSApp.currentSystemPresentationOptions, nativeFullscreen: nativeFullscreen)
+                        options: options.current(pid: frontPID), nativeFullscreen: nativeFullscreen)
     }
     static func isActive(windows: [[String: Any]], dockPID: pid_t, frontPID: pid_t,
                          displays: [CGRect], menuBarDisplay: CGRect,
                          options: NSApplication.PresentationOptions = [], nativeFullscreen: Bool = false) -> Bool {
-        // Leave native fullscreen chrome entirely to macOS. A nonactivating
-        // cover can otherwise keep its titlebar awake or leave our title behind.
+        isActive(records: windows.compactMap { WindowServerSnapshot.Window($0 as NSDictionary) },
+                 dockPID: dockPID, frontPID: frontPID, displays: displays, menuBarDisplay: menuBarDisplay,
+                 options: options, nativeFullscreen: nativeFullscreen)
+    }
+    static func isActive(records: [WindowServerSnapshot.Window], dockPID: pid_t, frontPID: pid_t,
+                         displays: [CGRect], menuBarDisplay: CGRect,
+                         options: NSApplication.PresentationOptions = [], nativeFullscreen: Bool = false) -> Bool {
+        // Leave native fullscreen chrome entirely to macOS.
         if nativeFullscreen { return true }
         if options.contains(.hideMenuBar) || options.contains([.fullScreen, .autoHideMenuBar]) { return true }
-        if isOverview(windows: windows, dockPID: dockPID, displays: displays) { return true }
+        if isOverview(records: records, dockPID: dockPID, displays: displays) { return true }
         guard frontPID > 0, !menuBarDisplay.isEmpty else { return false }
-        return windows.contains { row in
-            guard row[kCGWindowOwnerPID as String] as? pid_t == frontPID,
-                  let layer = row[kCGWindowLayer as String] as? Int,
-                  layer >= Int(CGWindowLevelForKey(.mainMenuWindow)),
-                  let frame = visibleFrame(row) else { return false }
-            return frame.contains(menuBarDisplay.insetBy(dx: 8, dy: 8))
+        return records.contains { row in
+            row.pid == frontPID && row.layer >= Int(CGWindowLevelForKey(.mainMenuWindow)) && row.visible
+                && row.frame.contains(menuBarDisplay.insetBy(dx: 8, dy: 8))
         }
     }
     static func isOverview(windows: [[String: Any]], dockPID: pid_t, displays: [CGRect]) -> Bool {
-        windows.contains { row in
-            guard row[kCGWindowOwnerPID as String] as? pid_t == dockPID,
-                  let layer = row[kCGWindowLayer as String] as? Int, (18...20).contains(layer),
-                  let frame = visibleFrame(row) else { return false }
-            return displays.contains { !$0.isEmpty && frame.contains($0.insetBy(dx: 8, dy: 8)) }
-        }
+        isOverview(records: windows.compactMap { WindowServerSnapshot.Window($0 as NSDictionary) }, dockPID: dockPID, displays: displays)
     }
-    private static func visibleFrame(_ row: [String: Any]) -> CGRect? {
-        guard row[kCGWindowIsOnscreen as String] as? Bool != false,
-              (row[kCGWindowAlpha as String] as? Double ?? 1) > 0.01,
-              let bounds = row[kCGWindowBounds as String] as? [String: Any] else { return nil }
-        return CGRect(dictionaryRepresentation: bounds as CFDictionary)
+    private static func isOverview(records: [WindowServerSnapshot.Window], dockPID: pid_t, displays: [CGRect]) -> Bool {
+        records.contains { row in
+            row.pid == dockPID && (18...20).contains(row.layer) && row.visible
+                && displays.contains { !$0.isEmpty && row.frame.contains($0.insetBy(dx: 8, dy: 8)) }
+        }
     }
 }

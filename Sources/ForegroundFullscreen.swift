@@ -66,7 +66,6 @@ final class ForegroundFullscreen {
     private static func queryWindow(pid: pid_t, completion: @escaping (Bool) -> Void) {
         queue.async {
             let value: Bool = {
-                guard AXIsProcessTrusted() else { return false }
                 let application = AXUIElementCreateApplication(pid)
                 AXUIElementSetMessagingTimeout(application, 0.05)
                 var focused: CFTypeRef?

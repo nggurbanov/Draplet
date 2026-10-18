@@ -95,7 +95,7 @@ Do not disable Gatekeeper or other system protections globally.
 bash test.sh
 ```
 
-The current suite has 139 checks covering icon layout, preferences, rendering,
+The current suite has 168 checks covering icon layout, preferences, rendering,
 transition cancellation, native-engine lifecycle, fullscreen detection and overlay ordering.
 Captured, minimized window-state fixtures cover the Minecraft and Fladder regressions.
 Passing these checks is not a substitute for testing gestures and fullscreen on real hardware.
@@ -123,3 +123,5 @@ original artwork as an homage. See [ThirdPartyNotices.md](ThirdPartyNotices.md)
 and [Vendor/HiddenBar/LICENSE](Vendor/HiddenBar/LICENSE).
 In-app updates use [Sparkle](https://sparkle-project.org/); its complete license is
 included in the app as `Sparkle-LICENSE`.
+
+Resource behavior, optimization details and a repeatable CPU/memory measurement command are documented in [PERFORMANCE.md](docs/PERFORMANCE.md).

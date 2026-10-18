@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                       previewAnimations: { [weak self] in self?.previewAnimations() })
         right.onSettings = { [weak self] in self?.settings.show() }
         left.onSettings = { [weak self] in self?.settings.show() }
+        MenuBarBackdrop.shared.onPresentationTick = { [weak self] in self?.left.tick() }
         right.onPause = { [weak self] in self?.togglePause() }
         right.onRevealAll = { [weak self] in self?.revealBoth() }
         right.isSettingsVisible = { [weak self] in self?.settings.window?.isVisible ?? false }
@@ -62,14 +63,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.left.setPresentationSuppressed(MenuBarBackdrop.shared.presentationSuppressed)
             self?.right.setPresentationSuppressed(MenuBarBackdrop.shared.presentationSuppressed)
         })
-        ForegroundFullscreen.shared.onChange = { MenuBarBackdrop.shared.checkScene() }
-        observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { notification in
+        ForegroundFullscreen.shared.onChange = { ForegroundApplication.shared.invalidate(); WindowServerSnapshot.shared.invalidate(); MenuBarBackdrop.shared.checkScene() }
+        observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { [weak self] notification in
             if let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
+                ForegroundApplication.shared.invalidate()
+                WindowServerSnapshot.shared.invalidate()
+                self?.left.menuBoundsCache.removeValue(forKey: app.processIdentifier)
                 ForegroundFullscreen.shared.forget(pid: app.processIdentifier)
                 SystemPresentation.forgetDock(pid: app.processIdentifier)
             }
         })
-        observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { _ in MenuBarBackdrop.shared.checkScene() })
+        observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { _ in ForegroundApplication.shared.invalidate(); WindowServerSnapshot.shared.invalidate(); MenuBarBackdrop.shared.checkScene() })
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil, queue: .main) { _ in
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { MenuBarBackdrop.shared.refreshAppearance() }
         })
@@ -77,12 +81,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in self?.refreshDisplays() })
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
             ForegroundFullscreen.shared.invalidate()
+            WindowServerSnapshot.shared.invalidate()
             MenuBarBackdrop.shared.checkScene()
             self?.left.syncVisibility()
             MenuBarBackdrop.shared.refreshAppearance()
         })
         presentationObserver = NSApp.observe(\.currentSystemPresentationOptions, options: [.new]) { _, _ in
-            DispatchQueue.main.async { MenuBarBackdrop.shared.checkScene() }
+            DispatchQueue.main.async { SystemPresentation.invalidateOptions(); MenuBarBackdrop.shared.checkScene() }
         }
         appearanceObserver = NSApp.observe(\.effectiveAppearance, options: [.new]) { _, _ in
             DispatchQueue.main.async { MenuBarBackdrop.shared.refreshAppearance() }
@@ -222,6 +227,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !terminating else { return }; terminating = true
         appearanceObserver = nil; presentationObserver = nil
         ForegroundFullscreen.shared.onChange = nil
+        MenuBarBackdrop.shared.onPresentationTick = nil
         permissionMonitor.stop()
         pulse?.invalidate(); left.stop(); right?.stop(); MenuBarBackdrop.shared.stop()
         if let hotkey { UnregisterEventHotKey(hotkey) }

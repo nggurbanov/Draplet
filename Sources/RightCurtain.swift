@@ -182,12 +182,14 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
     // An on-screen popup at menu level means a user is still operating a menu,
     // even when the pointer has left the menu-bar strip. No cross-process AX wait.
     var nativeMenuOpen: Bool {
-        let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
-        return windows.contains { row in
-            let layer = row[kCGWindowLayer as String] as? Int ?? 0
-            return layer >= Int(CGWindowLevelForKey(.popUpMenuWindow)) && layer < 110
+        // This is a rare collapse/preview decision: do not miss a popup that
+        // appeared between two shared presentation samples.
+        WindowServerSnapshot.shared.invalidate()
+        return WindowServerSnapshot.shared.current().contains {
+            $0.visible && $0.layer >= Int(CGWindowLevelForKey(.popUpMenuWindow)) && $0.layer < 110
         }
     }
+
     private var mouseInBar: Bool {
         let p = NSEvent.mouseLocation
         return NSScreen.screens.contains { screen in

@@ -5,6 +5,77 @@ func check(_ condition: @autoclosure () -> Bool, _ message: String) {
     precondition(condition(), message); assertions += 1
 }
 func frame(_ x: CGFloat) -> CGRect { CGRect(x: x, y: 0, width: 20, height: 24) }
+// One OS observation serves presentation, backdrop, popup and capture checks.
+var snapshotReads = 0, idReads = 0, targetedReads = 0
+var observedIDs: [UInt32] = [91]
+var dockAlpha = 1.0
+let dockRow: () -> NSDictionary = {
+    [kCGWindowNumber: 91, kCGWindowOwnerPID: 42, kCGWindowLayer: 20,
+     kCGWindowBounds: CGRect(x: 0, y: 0, width: 1470, height: 956).dictionaryRepresentation,
+     kCGWindowIsOnscreen: true, kCGWindowAlpha: dockAlpha] as NSDictionary
+}
+let snapshots = WindowServerSnapshot(read: { snapshotReads += 1; return [dockRow()] },
+    readIDs: { idReads += 1; return observedIDs }, readWindow: { _ in targetedReads += 1; return dockRow() })
+let sharedWindows = snapshots.current(at: 0)
+_ = snapshots.current(at: 0.01); _ = snapshots.current(at: 0.039)
+check(snapshotReads == 1 && idReads == 1 && sharedWindows.first?.pid == 42 && sharedWindows.first?.visible == true,
+      "Nearby consumers share typed window metadata without duplicate WindowServer reads")
+dockAlpha = 0
+let fadedDock = snapshots.current(at: 0.05)
+check(snapshotReads == 1 && idReads == 2 && targetedReads == 1 && fadedDock.first?.visible == false,
+      "A Dock fade with unchanged IDs is observed at 20 Hz without redescribing every window")
+observedIDs = [91,92]; _ = snapshots.current(at: 0.1)
+check(snapshotReads == 2, "A newly visible window triggers full discovery on the next 50 ms tick")
+_ = snapshots.current(at: 0.36)
+check(snapshotReads == 3, "Geometry changes without ID changes still have a bounded fallback")
+snapshots.invalidate(); _ = snapshots.current(at: 0.361)
+check(snapshotReads == 4, "App/Space/display changes invalidate observations immediately")
+_ = snapshots.current(at: 0.411, freshGeometry: true)
+check(snapshotReads == 5, "The cached-background scene can request current shadow geometry")
+var optionReads = 0
+var systemOptions: NSApplication.PresentationOptions = []
+let optionsCache = PresentationOptionsCache { optionReads += 1; return systemOptions }
+_ = optionsCache.current(pid: 10, at: 0); _ = optionsCache.current(pid: 10, at: 0.05)
+check(optionReads == 1, "Presentation option metadata is not copied at animation/presentation-watch frequency")
+systemOptions = [.hideMenuBar]; optionsCache.invalidate()
+check(optionsCache.current(pid: 10, at: 0.06).contains(.hideMenuBar) && optionReads == 2,
+      "An AppKit presentation notification bypasses the options cache immediately")
+_ = optionsCache.current(pid: 11, at: 0.07)
+check(optionReads == 3, "Switching applications never reuses another application's presentation options")
+_ = optionsCache.current(pid: 11, at: 0.33)
+check(optionReads == 4, "Unannounced presentation changes retain a bounded fallback")
+let foregroundA = NSRunningApplication.current
+let foregroundB = NSWorkspace.shared.runningApplications.first { $0.processIdentifier != getpid() }!
+var foregroundObject: NSRunningApplication? = foregroundA
+var resolvedForeground = 0
+let foreground = ForegroundApplication(read: { foregroundObject }, resolve: { app in
+    resolvedForeground += 1
+    return ForegroundApplication.Snapshot(pid: app === foregroundA ? 10 : 20, name: "Fixture")
+}, observeSystem: false)
+_ = foreground.current(at: 0); _ = foreground.current(at: 0.05); _ = foreground.current(at: 0.1)
+check(resolvedForeground == 1, "Fast polling shares foreground scalar properties instead of fetching LaunchServices metadata per frame")
+foregroundObject = foregroundB; foreground.observed(foregroundB, at: 0.11)
+check(foreground.current(at: 0.11)?.pid == 20 && resolvedForeground == 2, "A foreground KVO event publishes the new PID immediately")
+foreground.invalidate(); _ = foreground.current(at: 0.12)
+check(resolvedForeground == 3, "Activation notifications refresh foreground metadata immediately")
+foreground.observed(nil, at: 0.13)
+check(foreground.current(at: 0.14) == nil, "A missing foreground process never returns stale app metadata")
+foregroundObject = foregroundA
+check(foreground.current(at: 0.64)?.pid == 10 && resolvedForeground == 4, "Missed foreground notifications retain a bounded fallback")
+var gate = FrameDeliveryGate()
+let firstFrame = gate.begin()!
+check(gate.begin() == nil, "A busy main thread cannot accumulate converted capture frames")
+gate.reset(); let replacementFrame = gate.begin()!
+gate.finish(firstFrame)
+check(gate.begin() == nil, "A stale delivery cannot unlock a new stream's pending frame")
+gate.finish(replacementFrame)
+check(gate.begin() != nil, "Finishing delivery admits the next live frame")
+check(LeftCurtain.menuQueryInterval(revealed: false, nearMenu: false, tracking: false, popup: false) == 1,
+      "Unused hidden menu geometry is queried at most once per second")
+for state in [(true,false,false,false),(false,true,false,false),(false,false,true,false),(false,false,false,true)] {
+    check(LeftCurtain.menuQueryInterval(revealed: state.0, nearMenu: state.1, tracking: state.2, popup: state.3) == 0.15,
+          "Pointer, revealed, selected and keyboard popup menus retain fast AX queries")
+}
 let inventory = [
     MenuBarInventoryItem(bundleIdentifier: "visible", frame: frame(700)),
     MenuBarInventoryItem(bundleIdentifier: "hidden", frame: frame(500)),
@@ -232,6 +303,24 @@ if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
     curtain.animate()
     check(!curtain.animationRunning && testView.progress == 0 && curtain.clickPanel!.isVisible,
           "Animated collapse finishes with a visible clickable toggle")
+    // Capture the real setter, not a dirty flag cleared by displayIfNeeded.
+    final class RedrawCounter: NSView {
+        var requests = 0
+        override var needsDisplay: Bool {
+            get { super.needsDisplay }
+            set { if newValue { requests += 1 }; super.needsDisplay = newValue }
+        }
+    }
+    let oldContent = curtain.clickPanel!.contentView!
+    let counter = RedrawCounter(frame: oldContent.bounds)
+    curtain.clickPanel!.contentView = counter
+    let normalized = curtain.clickPanel!.frame
+    curtain.clickPanel!.setFrame(NSRect(x: floor(normalized.minX), y: floor(normalized.minY), width: normalized.width, height: normalized.height), display: false)
+    let beforeRequests = counter.requests
+    curtain.updateClickTarget()
+    check(counter.requests == beforeRequests,
+          "WindowServer-rounded coordinates must not schedule another indicator repaint while stationary")
+    curtain.clickPanel!.contentView = oldContent
     let collapsedX = curtain.clickPanel!.frame.minX
     testView.progress = 1; curtain.revealed = true
     curtain.updateClickTarget()
@@ -419,6 +508,20 @@ func nativeFixture(light: Bool, transparent: Bool = false) -> CGImage {
     }
     return rep.cgImage!
 }
+// The histogram median must preserve the original sampled, upper-median rule.
+for values: [UInt8] in [[3,250,80,160,40], [20,190]] {
+    let width = values.count * 4 - 1
+    var bytes = [UInt8](repeating: 0, count: width * 4)
+    for x in 0..<width { bytes[x*4] = values[x/4]; bytes[x*4+1] = 36; bytes[x*4+2] = 72; bytes[x*4+3] = 255 }
+    let provider = CGDataProvider(data: Data(bytes) as CFData)!
+    let source = CGImage(width: width, height: 1, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width*4,
+                         space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                         provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)!
+    let treatment = NativeBarTreatment(native: source, logicalWidth: CGFloat(width))!
+    let output = CFDataGetBytePtr(treatment.image.dataProvider!.data!)!
+    check(output[0] == values.sorted()[values.count/2] && output[1] == 36 && output[2] == 72 && output[3] == 255,
+          "Histogram reconstruction exactly preserves sampled medians for odd/even counts and partial scanlines")
+}
 let opaqueTreatment = NativeBarTreatment(native: nativeFixture(light: false), logicalWidth: 200)!
 let nativeRows = NSBitmapImageRep(cgImage: opaqueTreatment.image)
 check(abs(nativeRows.colorAt(x: 0, y: 15)!.redComponent - 0.145) < 0.01,
@@ -588,6 +691,8 @@ check(reminder.isDue(at: reminderNow, presentationSuppressed: false), "A newer b
 // Keep it offscreen so the test does not put a second Settings window on the desktop.
 let settings = SettingsController(prefs: prefs, requestPermission: {}, replaceHiddenBar: {},
                                   revealBoth: {}, pause: {}, previewAnimations: {})
+check(settings.window == nil, "Background startup does not instantiate Settings hosting views")
+settings.prepareWindow()
 settings.window?.setFrameOrigin(NSPoint(x: -4000, y: 0))
 check(app.activationPolicy() == .accessory, "Constructing Settings alone does not add a Dock icon")
 settings.show()
@@ -596,8 +701,12 @@ settings.window?.miniaturize(nil)
 check(app.activationPolicy() == .regular, "Minimized Settings keeps its Dock icon so it can be restored")
 settings.window?.close()
 check(app.activationPolicy() == .accessory, "Closing minimized Settings removes its Dock icon")
+check(settings.window == nil, "Closing Settings releases its hidden window and hosting hierarchy")
+settings.navigation.page = .right
+settings.prepareWindow(); settings.window?.setFrameOrigin(NSPoint(x: -4000, y: 0))
 settings.show()
-check(app.activationPolicy() == .regular, "Reopening the same Settings window restores the Dock icon")
+check(settings.navigation.page == .right, "Recreating Settings retains navigation state")
+check(app.activationPolicy() == .regular, "Reopening Settings restores the Dock icon")
 settings.window?.close()
 check(app.activationPolicy() == .accessory, "Closing reopened Settings returns Draplet to menu-bar-only mode")
 print("Passed \(assertions) lifecycle, preference, rendering, and animation checks")

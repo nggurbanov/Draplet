@@ -498,12 +498,25 @@ final class SettingsController: NSWindowController, NSToolbarDelegate, NSWindowD
     let navigation = SettingsNavigation()
     private let prefs: Preferences
     private let pause: () -> Void
+    private let requestPermission: () -> Void
+    private let replaceHiddenBar: () -> Void
+    private let revealBoth: () -> Void
+    private let previewAnimations: () -> Void
     init(prefs: Preferences, requestPermission: @escaping () -> Void,
          replaceHiddenBar: @escaping () -> Void, revealBoth: @escaping () -> Void, pause: @escaping () -> Void,
          previewAnimations: @escaping () -> Void) {
         self.prefs = prefs; self.pause = pause
+        self.requestPermission = requestPermission; self.replaceHiddenBar = replaceHiddenBar
+        self.revealBoth = revealBoth; self.previewAnimations = previewAnimations
+        super.init(window: nil)
+    }
+    // Ordinary background ticks may inspect `window`; they must not construct
+    // an entire SwiftUI Settings hierarchy before the user opens it.
+    override func loadWindow() {}
+    func prepareWindow() {
+        guard window == nil else { return }
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 940, height: 710), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        super.init(window: window)
+        self.window = window
         let view = SettingsView(prefs: prefs, navigation: navigation, requestPermission: requestPermission,
                                 replaceHiddenBar: replaceHiddenBar, revealBoth: revealBoth, pause: pause, previewAnimations: previewAnimations)
         window.contentViewController = NSHostingController(rootView: view)
@@ -543,8 +556,16 @@ final class SettingsController: NSWindowController, NSToolbarDelegate, NSWindowD
         return item
     }
     func show() {
+        prepareWindow()
         NSApp.setActivationPolicy(.regular)
         showWindow(nil); window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
     }
-    func windowWillClose(_ notification: Notification) { NSApp.setActivationPolicy(.accessory) }
+    func windowWillClose(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+        // Keep navigation/preferences, release hidden hosting views and toolbar.
+        if let closed = notification.object as? NSWindow {
+            closed.contentViewController = nil; closed.toolbar = nil
+        }
+        window = nil
+    }
 }

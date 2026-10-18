@@ -7,11 +7,12 @@ mkdir -p .build/Draplet.app/Contents/{MacOS,Resources,Frameworks}
 xcrun clang -fobjc-arc -fblocks -DHIDDENBAR_NATIVE_VISIBILITY=1 \
   -mmacosx-version-min=14.2 -c Vendor/HiddenBar/Engine/Native/HBNativeVisibilityShim.m -o .build/NativeVisibility.o
 swift_sources=(Sources/*.swift Vendor/HiddenBar/Engine/*.swift Vendor/HiddenBar/Engine/Native/*.swift Vendor/HiddenBar/Layout/*.swift)
+xcrun clang -fobjc-arc -fblocks -mmacosx-version-min=14.2 -c Sources/WindowServerBridge.m -o .build/WindowServerBridge.o
 xcrun swiftc -O -swift-version 5 -target "$(uname -m)-apple-macos14.2" -D HIDDENBAR_NATIVE_VISIBILITY \
   -module-cache-path "${TMPDIR:-/tmp}/codex-swift-module-cache" \
-  -import-objc-header Vendor/HiddenBar/Engine/Native/HBNativeVisibilityShim.h \
+  -import-objc-header Sources/WindowServerBridge.h \
   -F "$sparkle" -framework Sparkle -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
-  "${swift_sources[@]}" .build/NativeVisibility.o -o .build/Draplet.app/Contents/MacOS/Draplet
+  "${swift_sources[@]}" .build/NativeVisibility.o .build/WindowServerBridge.o -o .build/Draplet.app/Contents/MacOS/Draplet
 cp Resources/Info.plist .build/Draplet.app/Contents/Info.plist
 ditto "$sparkle/Sparkle.framework" .build/Draplet.app/Contents/Frameworks/Sparkle.framework
 cp "$sparkle/LICENSE" .build/Draplet.app/Contents/Resources/Sparkle-LICENSE

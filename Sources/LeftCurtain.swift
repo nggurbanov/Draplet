@@ -26,13 +26,21 @@ var animationRunning = false
 var animationFrameCount = 0
 var animationFirstFrameDelay: Double?
 var manualUntil = Date.distantPast
-var timer: Timer?
 var activationObserver: NSObjectProtocol?
 var animationTimer: Timer?
 var mouseMonitor: Any?
 var enabled = false
 var presentationSuppressed = false
 var clickPanel: CoverPanel?
+private struct IndicatorLayout: Equatable {
+    let cover: CGRect
+    let titleWidth: CGFloat
+    let menuEnd: CGFloat
+    let progress: Double
+    let style: BarAnimation
+    let revealed: Bool
+}
+private var indicatorLayout: IndicatorLayout?
 var manuallyCollapsed = false
 var onSettings: (() -> Void)?
 private let prefs = Preferences.shared
@@ -52,7 +60,14 @@ func emit(_ event: String, _ extras: [String: Any] = [:]) {
 }
 
 final class CoverView: NSView {
-    var applicationName = "" { didSet { needsDisplay = true } }
+    var applicationName = "" { didSet { measuredTitleWidth = nil; needsDisplay = true } }
+    private var measuredTitleWidth: CGFloat?
+    var titleWidth: CGFloat {
+        if let width = measuredTitleWidth { return width }
+        let width = (applicationName as NSString).size(withAttributes: [.font: font]).width
+        measuredTitleWidth = width
+        return width
+    }
     var menuStart: CGFloat = 120 { didSet { needsDisplay = true } }
     var menuEnd: CGFloat = 420 { didSet { needsDisplay = true } }
     var progress = 0.0 { didSet { needsDisplay = true } }
@@ -62,7 +77,7 @@ final class CoverView: NSView {
     override var isOpaque: Bool { false }
 
     func estimatedMenuStart() -> CGFloat {
-        min(bounds.width, (applicationName as NSString).size(withAttributes: [.font: font]).width + 22)
+        min(bounds.width, titleWidth + 22)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -95,7 +110,6 @@ final class CoverPanel: NSPanel {
 }
 
 func menuBar(_ pid: pid_t) -> AXUIElement? {
-    guard AXIsProcessTrusted() else { return nil }
     let element = AXUIElementCreateApplication(pid)
     AXUIElementSetMessagingTimeout(element, 0.1)
     var menu: CFTypeRef?
@@ -202,8 +216,8 @@ func animate() {
 }
 
 func updateTitle(presentationActive: () -> Bool = SystemPresentation.current) {
-    guard let front = NSWorkspace.shared.frontmostApplication,
-          front.processIdentifier != currentPID else { return }
+    guard let front = ForegroundApplication.shared.current(),
+          front.pid != currentPID else { return }
     // Workspace observers can run in either order. Resolve a cached fullscreen
     // Space before drawing its title, even if our activation observer runs first.
     if presentationActive() {
@@ -212,9 +226,9 @@ func updateTitle(presentationActive: () -> Bool = SystemPresentation.current) {
         return
     }
     let wasVisible = panel?.isVisible ?? false
-    currentPID = front.processIdentifier
+    currentPID = front.pid
     manuallyCollapsed = false
-    currentApp = front.localizedName ?? "Application"
+    currentApp = front.name
     if let view = panel?.contentView as? CoverView {
         view.applicationName = currentApp
         let cached = menuBoundsCache[currentPID]
@@ -237,6 +251,12 @@ func updateTitle(presentationActive: () -> Bool = SystemPresentation.current) {
                    "windowNumber": panel?.windowNumber ?? 0])
 }
 
+static func menuQueryInterval(revealed: Bool, nearMenu: Bool, tracking: Bool, popup: Bool) -> TimeInterval {
+    // Keep interaction/keyboard menus responsive; hidden, unused menus don't
+    // need their entire AX heading geometry read several times each second.
+    revealed || nearMenu || tracking || popup ? 0.15 : 1
+}
+
 func tick() {
     guard enabled, !presentationSuppressed else { return }
     syncVisibility()
@@ -244,7 +264,12 @@ func tick() {
     updateTitle()
     guard !paused else { return }
     let now = Date()
-    if !queryInFlight && now.timeIntervalSince(lastMenuCheck) > 0.15 {
+    let nearMenu = coverFrame.insetBy(dx: -9, dy: -9).contains(NSEvent.mouseLocation)
+    let popup = WindowServerSnapshot.shared.current().contains {
+        $0.pid == currentPID && $0.visible && (101..<110).contains($0.layer)
+    }
+    let interval = Self.menuQueryInterval(revealed: revealed, nearMenu: nearMenu, tracking: menuIsTracking, popup: popup)
+    if !queryInFlight && now.timeIntervalSince(lastMenuCheck) > interval {
         lastMenuCheck = now
         queryInFlight = true
         let pid = currentPID
@@ -320,7 +345,6 @@ func stop() {
     revealed = false; animationRunning = false; enteredAt = nil
     animationTimer?.invalidate(); animationTimer = nil
     if let mouseMonitor { NSEvent.removeMonitor(mouseMonitor); self.mouseMonitor = nil }
-    timer?.invalidate()
     if let activationObserver { NSWorkspace.shared.notificationCenter.removeObserver(activationObserver) }
     panel?.orderOut(nil)
     panel?.close()
@@ -366,8 +390,6 @@ func start() {
     updateTitle()
     if !presentationSuppressed { cover.orderFrontRegardless() }
     refreshPreferences()
-    timer = Timer(timeInterval: 1.0 / 20, repeats: true) { [weak self] _ in self?.tick() }
-    RunLoop.main.add(timer!, forMode: .common)
     activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
         forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
     ) { [weak self] _ in self?.updateTitle() }
@@ -392,6 +414,7 @@ func refreshBackground() {
 }
 
 func refreshPreferences() {
+    indicatorLayout = nil
     (panel?.contentView as? CoverView)?.animationStyle = prefs.animation(for: .left)
     panel?.contentView?.needsDisplay = true
     refreshBackground()
@@ -415,11 +438,15 @@ static func indicatorFrame(cover: NSRect, titleWidth: CGFloat, menuEnd: CGFloat,
 func updateClickTarget() {
     guard enabled, !presentationSuppressed, panel?.isVisible == true,
           let view = panel?.contentView as? CoverView else { clickPanel?.orderOut(nil); return }
-    let width = min((view.applicationName as NSString).size(withAttributes: [.font: view.font]).width, coverFrame.width - 45)
+    let width = min(view.titleWidth, coverFrame.width - 45)
+    let layout = IndicatorLayout(cover: coverFrame, titleWidth: width, menuEnd: view.menuEnd,
+                                 progress: view.progress, style: view.animationStyle, revealed: revealed)
+    if indicatorLayout == layout, clickPanel?.isVisible == true { return }
+    indicatorLayout = layout
     let closedFrame = Self.indicatorFrame(cover: coverFrame, titleWidth: width, menuEnd: view.menuEnd, expanded: false)
     let openFrame = Self.indicatorFrame(cover: coverFrame, titleWidth: width, menuEnd: view.menuEnd, expanded: true)
     let progress = min(1, max(0, view.progress))
-    let frame: NSRect
+    var frame: NSRect
     if view.animationStyle == .fade {
         // A moving opaque button would punch a black hole in fading headings.
         frame = progress > 0 ? openFrame : closedFrame
@@ -432,6 +459,11 @@ func updateClickTarget() {
         // Never slide the full-width-menu fallback across the Apple/app title.
         frame = progress > 0 ? openFrame : closedFrame
     }
+    // WindowServer stores these borderless windows at whole-point origins.
+    // Comparing its rounded result to fractional text metrics otherwise moves
+    // and paints an unchanged indicator on every 20 Hz poll.
+    frame = NSRect(x: floor(frame.minX), y: floor(frame.minY),
+                   width: floor(frame.width), height: floor(frame.height))
     if clickPanel == nil {
         let hit = CoverPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         hit.level = coverLevel
