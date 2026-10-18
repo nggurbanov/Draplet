@@ -4,10 +4,13 @@ import Sparkle
 
 // Sparkle owns archive verification, replacement, rollback and install-on-quit.
 // This controller owns the visible reminder, never the installation mechanics.
-final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
+final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate, SPUStandardUserDriverDelegate {
     static let shared = AppUpdater()
     @Published private(set) var status = "Updates have not been checked yet."
     @Published private(set) var readyVersion: String?
+    @Published private(set) var pendingVersion: String?
+    var updateVersion: String? { readyVersion ?? pendingVersion }
+    var actionTitle: String { readyVersion != nil ? "Update and Relaunch" : (pendingVersion != nil ? "Review Update…" : "Check for Updates…") }
     @Published private(set) var canCheck = false
     @Published private(set) var automaticChecks = true
     @Published private(set) var automaticDownloads = true
@@ -22,7 +25,7 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
 
     func start() {
         guard controller == nil else { return }
-        let controller = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: self, userDriverDelegate: nil)
+        let controller = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: self, userDriverDelegate: self)
         self.controller = controller
         observations = [
             controller.updater.observe(\.canCheckForUpdates, options: [.initial, .new]) { [weak self] updater, _ in
@@ -47,7 +50,10 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
     func setAutomaticChecks(_ value: Bool) { controller?.updater.automaticallyChecksForUpdates = value }
     func setAutomaticDownloads(_ value: Bool) { controller?.updater.automaticallyDownloadsUpdates = value }
     func check() {
-        guard let controller, canCheck else { return }
+        if readyVersion != nil { showReminderIfDue(force: true); return }
+        guard let controller else { return }
+        if pendingVersion != nil { controller.checkForUpdates(nil); return }
+        guard canCheck else { return }
         status = "Checking for updates…"
         controller.checkForUpdates(nil)
     }
@@ -56,25 +62,42 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
         status = "Installing and relaunching…"
         install()
     }
+    func performUpdateAction() {
+        if readyVersion != nil { installNow() } else { check() }
+    }
+    var supportsGentleScheduledUpdateReminders: Bool { true }
+    func standardUserDriverShouldHandleShowingScheduledUpdate(_ update: SUAppcastItem, andInImmediateFocus immediateFocus: Bool) -> Bool { false }
+    func standardUserDriverWillHandleShowingUpdate(_ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem, state: SPUUserUpdateState) {
+        guard !handleShowingUpdate, !state.userInitiated else { return }
+        pendingVersion = update.displayVersionString
+        status = "An update is available. Review it to download and install."
+        reminder.receive(update.versionString); saveReminder()
+        DispatchQueue.main.async { [weak self] in self?.showReminderIfDue() }
+    }
+    func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) { pendingVersion = nil }
+    func standardUserDriverWillFinishUpdateSession() { pendingVersion = nil }
     private func saveReminder() {
         UserDefaults.standard.set(reminder.version, forKey: "updateReminderVersion")
         UserDefaults.standard.set(reminder.deferredUntil, forKey: "updateReminderDeferredUntil")
     }
-    private func showReminderIfDue() {
-        guard readyVersion != nil, !showingReminder,
-              reminder.isDue(at: Date(), presentationSuppressed: SystemPresentation.current()) else { return }
+    private func showReminderIfDue(force: Bool = false) {
+        guard controller != nil, let version = updateVersion, !showingReminder,
+              !SystemPresentation.current(), force || reminder.isDue(at: Date(), presentationSuppressed: false) else { return }
         // Don't steal focus from another modal sheet or run during termination.
         guard NSApp.modalWindow == nil else { return }
         showingReminder = true
         let alert = NSAlert()
-        alert.messageText = "Draplet \(readyVersion!) is ready to install"
-        alert.informativeText = "Update now for the latest fixes. You can keep working and install automatically when you quit Draplet."
-        alert.addButton(withTitle: "Update and Relaunch")
+        let downloaded = readyVersion != nil
+        alert.messageText = downloaded ? "Draplet \(version) is ready to install" : "Draplet \(version) is available"
+        alert.informativeText = downloaded
+            ? "Update now for the latest fixes. You can keep working and install automatically when you quit Draplet."
+            : "Review the update to download and install the latest fixes. Nothing will be installed until you choose to proceed."
+        alert.addButton(withTitle: downloaded ? "Update and Relaunch" : "Review Update…")
         alert.addButton(withTitle: "Remind Me in an Hour")
         NSApp.activate(ignoringOtherApps: true)
         let response = alert.runModal()
         showingReminder = false
-        if response == .alertFirstButtonReturn { installNow() }
+        if response == .alertFirstButtonReturn { performUpdateAction() }
         else { reminder.deferOneHour(from: Date()); saveReminder() }
     }
     func updater(_ updater: SPUUpdater, didFindValidUpdate item: SUAppcastItem) {
@@ -87,6 +110,7 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
                  immediateInstallationBlock immediateInstallHandler: @escaping () -> Void) -> Bool {
         immediateInstall = immediateInstallHandler
         NSLog("Draplet update staged: build %@; installs on normal quit", item.versionString)
+        pendingVersion = nil
         readyVersion = item.displayVersionString
         status = "Ready. Installs when you quit Draplet, or update now."
         reminder.receive(item.versionString)
@@ -97,6 +121,7 @@ final class AppUpdater: NSObject, ObservableObject, SPUUpdaterDelegate {
     func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
         let error = error as NSError
         readyVersion = nil
+        pendingVersion = nil
         immediateInstall = nil
         if error.domain == SUSparkleErrorDomain && error.code == Int(SUError.noUpdateError.rawValue) {
             status = "Draplet is up to date."

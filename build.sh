@@ -20,21 +20,7 @@ cp Vendor/HiddenBar/LICENSE .build/Draplet.app/Contents/Resources/HiddenBar-LICE
 mkdir -p .build/Draplet.app/Contents/Resources/HiddenBar
 cp Resources/HiddenBar/*.png .build/Draplet.app/Contents/Resources/HiddenBar/
 if [ -f Resources/Draplet.icns ]; then cp Resources/Draplet.icns .build/Draplet.app/Contents/Resources/; fi
-identity="${DRAPLET_SIGNING_IDENTITY:-auto}"
-if [ "$identity" = "auto" ]; then
-  identity=$(security find-identity -v -p codesigning | awk '/"Apple Development:/{print $2; exit}')
-  identity="${identity:--}"
-fi
-# Re-sign nested code with the host identity so hardened library validation works.
-# Ad-hoc alpha distributions omit hardened runtime; their archive is EdDSA signed.
-sign_options=()
-if [ "$identity" != "-" ]; then sign_options=(--options runtime); fi
-framework=.build/Draplet.app/Contents/Frameworks/Sparkle.framework
-for helper in "$framework"/Versions/B/XPCServices/*.xpc "$framework"/Versions/B/Updater.app; do
-  codesign --force --sign "$identity" "${sign_options[@]}" "$helper"
-done
-codesign --force --sign "$identity" "${sign_options[@]}" "$framework"/Versions/B/Autoupdate
-codesign --force --sign "$identity" "${sign_options[@]}" "$framework"
-codesign --force --sign "$identity" "${sign_options[@]}" .build/Draplet.app
-codesign --verify --strict .build/Draplet.app
+# Ad-hoc alpha artifacts omit hardened runtime. Development/distribution
+# identities enable it after re-signing every nested helper with the same identity.
+bash scripts/sign-app.sh .build/Draplet.app "${DRAPLET_SIGNING_IDENTITY:-auto}"
 echo "Built: $PWD/.build/Draplet.app"

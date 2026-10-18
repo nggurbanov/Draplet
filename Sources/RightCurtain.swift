@@ -68,6 +68,7 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
     func updatePresentation() {
         let collapsed = !transition.expanded
         toggleItem.button?.image = IndicatorIcons.image(for: .right, expanded: !collapsed)
+        toggleItem.button?.setAccessibilityLabel(collapsed ? "Reveal status icons" : "Hide status icons")
         toggleItem.button?.toolTip = "Draplet · Click to \(collapsed ? "reveal" : "hide") icons · Right-click for settings"
         if !prefs.rightEnabled || prefs.paused { prefs.rightStatus = "Paused" }
         else if competingApp != nil { prefs.rightStatus = "Waiting for Hidden Bar to quit" }

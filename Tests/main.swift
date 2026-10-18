@@ -33,7 +33,7 @@ final class Inventory: MenuBarInventoryProviding {
     var callback: (([MenuBarInventoryItem]) -> Void)?
     func requestAuthorization() {}
     func snapshot(completion: @escaping ([MenuBarInventoryItem]) -> Void) { callback = completion }
-    func finish() { let completion = callback; callback = nil; completion?(inventory) }
+    func finish(_ value: [MenuBarInventoryItem] = inventory) { let completion = callback; callback = nil; completion?(value) }
 }
 final class Handle: NativeVisibilityAssertion {
     var invalidated = false
@@ -48,6 +48,41 @@ final class Visibility: NativeVisibilityProviding {
     }
     func finish(_ result: Result<NativeVisibilityAssertion, Error>) { let completion = callback; callback = nil; completion?(result) }
 }
+let invalidSuite = "Draplet.InvalidPreferences.\(UUID().uuidString)"
+let invalidStore = UserDefaults(suiteName: invalidSuite)!
+invalidStore.set(-1, forKey: "shortcut")
+let invalidPrefs = Preferences(store: invalidStore)
+check(invalidPrefs.shortcut == 3, "An invalid saved shortcut is disabled before it can index the hotkey table")
+invalidPrefs.leftEnabled = false
+invalidPrefs.rightEnabled = true
+invalidPrefs.sameAnimation = false
+invalidPrefs.rightAnimation = .curtain
+invalidPrefs.permissionGranted = false
+check(!invalidPrefs.needsBackground, "Without Accessibility no hiding engine needs background capture")
+invalidPrefs.permissionGranted = true
+invalidPrefs.backgroundPermission = false
+invalidPrefs.rightAnimation = .hiddenBar
+check(!invalidPrefs.requiresSetup, "Native right-only hiding does not demand unused screen-capture permission on every launch")
+invalidStore.removePersistentDomain(forName: invalidSuite)
+var permissionReplies: [(PermissionState) -> Void] = []
+let permissionMonitor = PermissionMonitor { permissionReplies.append($0) }
+var permissionChanges: [PermissionState] = []
+permissionMonitor.onChange = { permissionChanges.append($0) }
+permissionMonitor.poll(at: 0); permissionMonitor.poll(at: 0.25); permissionMonitor.poll(at: 2)
+check(permissionReplies.count == 1, "Slow permission checks are single-flight without blocking the UI")
+let grantedPermissions = PermissionState(accessibility: true, screenCapture: true)
+permissionReplies[0](grantedPermissions)
+permissionMonitor.poll(at: 2.1)
+check(permissionReplies.count == 2 && permissionChanges == [grantedPermissions], "A completed permission check publishes the current state")
+permissionReplies[1](grantedPermissions)
+permissionMonitor.poll(at: 2.5)
+check(permissionReplies.count == 2 && permissionChanges.count == 1, "Unchanged permissions neither flood queries nor reconfigure the app")
+permissionMonitor.poll(at: 3.2)
+permissionReplies[2](PermissionState(accessibility: false, screenCapture: true))
+check(permissionChanges.count == 2 && !permissionChanges[1].accessibility, "Revoking Accessibility is delivered to the hiding engines")
+permissionMonitor.poll(at: 4.3); permissionMonitor.stop(); permissionReplies[3](grantedPermissions)
+permissionMonitor.poll(at: 6)
+check(permissionChanges.count == 2 && permissionReplies.count == 4, "Termination discards late permission replies and stops polling")
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 var fullscreenQueries: [(pid_t, (Bool) -> Void)] = []
@@ -228,6 +263,14 @@ if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
           "Restoring the desktop returns both left windows after presentation is allowed")
     curtain.stop()
 }
+let emptyItems = Items(), emptyReader = Inventory(), emptyBridge = Visibility()
+let emptyEngine = NativeVisibilityEngine(items: emptyItems, inventory: emptyReader, visibility: emptyBridge,
+    ownBundleIdentifier: "own", itemFrame: { _ in frame(600) }, isLTR: { true })
+var emptyResult: CollapseResult?
+emptyEngine.collapse { emptyResult = $0 }
+emptyReader.finish([])
+check(emptyResult == .unavailable && emptyBridge.callback == nil && emptyEngine.state == .expanded,
+      "An empty AX inventory fails open instead of hiding every third-party icon")
 let items = Items(), reader = Inventory(), bridge = Visibility()
 let engine = NativeVisibilityEngine(items: items, inventory: reader, visibility: bridge,
                                     ownBundleIdentifier: "own", itemFrame: { _ in frame(600) }, isLTR: { true })
@@ -516,6 +559,17 @@ visualCover.finish(); visualEngine.finish(.collapsed); runScheduled(RightMenuTra
 transitions.cancelAndExpand()
 check(!visualCover.isVisible && visualEngine.state == .expanded,
       "Pausing or reconfiguring still removes a retained closed curtain and releases native hiding")
+var captureRetry = CaptureRetryPolicy()
+check(captureRetry.failed(permissionGranted: false) == nil, "Denied capture permission never triggers an automatic retry")
+check(captureRetry.failed(permissionGranted: true) == 0.5, "A transient interruption gets a short first retry")
+check(captureRetry.failed(permissionGranted: true) == 1.5, "Consecutive capture failures back off")
+check(captureRetry.failed(permissionGranted: true) == nil, "Repeated failures stop instead of creating an infinite capture loop")
+captureRetry.reset()
+check(captureRetry.failed(permissionGranted: true) == 0.5, "A successful capture or explicit restart resets retry allowance")
+let updateSelectors = ["supportsGentleScheduledUpdateReminders", "standardUserDriverShouldHandleShowingScheduledUpdate:andInImmediateFocus:",
+    "standardUserDriverWillHandleShowingUpdate:forUpdate:state:", "standardUserDriverDidReceiveUserAttentionForUpdate:", "standardUserDriverWillFinishUpdateSession"]
+check(updateSelectors.allSatisfy { AppUpdater.shared.responds(to: NSSelectorFromString($0)) },
+      "Sparkle can reach every native scheduled-update reminder delegate callback")
 // Reminder deferral survives restarts, but never suppresses a newer build.
 let reminderNow = Date(timeIntervalSince1970: 1_800_000_000)
 var reminder = UpdateReminderPolicy()

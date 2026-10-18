@@ -5,21 +5,28 @@ import AppKit
 // apps can do the same, so combine window geometry with their focused AX window.
 // This uses existing Accessibility access, without pixel capture.
 enum SystemPresentation {
-    private static var dock: NSRunningApplication?
+    private static var dockPID: pid_t?
+    static func forgetDock(pid: pid_t) { if dockPID == pid { dockPID = nil } }
+    private static var geometry: (displays: [CGRect], menuBar: CGRect)?
+    static func invalidateDisplays() { geometry = nil }
     static func current() -> Bool {
         let frontPID = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
         let nativeFullscreen = ForegroundFullscreen.shared.current(pid: frontPID)
-        if dock == nil || dock?.isTerminated == true {
-            dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first
+        if dockPID == nil {
+            dockPID = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first?.processIdentifier
         }
         let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
-        let displays = NSScreen.screens.compactMap { screen in
-            (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)
-                .map { CGDisplayBounds($0.uint32Value) }
+        if geometry == nil {
+            let displays = NSScreen.screens.compactMap { screen in
+                (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)
+                    .map { CGDisplayBounds($0.uint32Value) }
+            }
+            geometry = (displays, CGDisplayBounds(CGMainDisplayID()))
         }
-        return isActive(windows: windows, dockPID: dock?.processIdentifier ?? -1,
+        let geometry = geometry!
+        return isActive(windows: windows, dockPID: dockPID ?? -1,
                         frontPID: frontPID,
-                        displays: displays, menuBarDisplay: CGDisplayBounds(CGMainDisplayID()),
+                        displays: geometry.displays, menuBarDisplay: geometry.menuBar,
                         options: NSApp.currentSystemPresentationOptions, nativeFullscreen: nativeFullscreen)
     }
     static func isActive(windows: [[String: Any]], dockPID: pid_t, frontPID: pid_t,

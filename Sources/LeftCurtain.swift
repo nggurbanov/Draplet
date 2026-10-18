@@ -455,9 +455,11 @@ func updateClickTarget() {
         clickPanel = hit
     }
     if let button = clickPanel?.contentView?.subviews.first as? NSButton {
-        button.image = IndicatorIcons.image(for: .left, expanded: revealed)
-        button.setAccessibilityLabel(revealed ? "Hide application menus" : "Reveal application menus")
-        button.toolTip = revealed ? "Hide application menus" : "Reveal application menus"
+        let image = IndicatorIcons.image(for: .left, expanded: revealed)
+        let label = revealed ? "Hide application menus" : "Reveal application menus"
+        if button.image !== image { button.image = image }
+        if button.accessibilityLabel() != label { button.setAccessibilityLabel(label) }
+        if button.toolTip != label { button.toolTip = label }
     }
     if clickPanel?.frame != frame {
         clickPanel?.setFrame(frame, display: false)

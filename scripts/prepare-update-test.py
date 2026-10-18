@@ -3,16 +3,27 @@
 import pathlib
 import plistlib
 import subprocess
+import os
 import sys
 import xml.etree.ElementTree as ET
 ET.register_namespace("sparkle", "http://www.andymatuschak.org/xml-namespaces/sparkle")
 
 root = pathlib.Path(__file__).resolve().parents[1]
 scenario = sys.argv[1] if len(sys.argv) > 1 else 'good'
-assert scenario in ('good', 'bad-signature', 'network')
+assert scenario in ('good', 'bad-signature', 'network', 'scheduled')
 suffix = '' if scenario == 'good' else '.' + scenario.replace('-', '')
+run_id = os.environ.get('DRAPLET_TEST_RUN_ID', '')
+if run_id:
+    assert run_id.isalnum(), 'Use an alphanumeric test run ID'
+    suffix += '.' + run_id
 base = root / '.build' / ('update-test' + suffix)
 base.mkdir(parents=True, exist_ok=True)
+commands = [line.strip().split(None, 1)[-1] for line in subprocess.check_output(['ps', '-axo', 'pid=,command='], text=True).splitlines()]
+for kind in ('installed', 'release'):
+    executable = base / kind / 'Draplet Update Test.app/Contents/MacOS/Draplet'
+    names = [str(executable), str(executable.relative_to(root))]
+    if any(command == name or command.startswith(name + ' ') for command in commands for name in names):
+        raise SystemExit('Quit the existing update fixture before preparing another run.')
 for kind, build in [('installed', '100'), ('release', '101')]:
     app = base / kind / 'Draplet Update Test.app'
     subprocess.run(['ditto', str(root / '.build/Draplet.app'), str(app)], check=True)
@@ -23,8 +34,10 @@ for kind, build in [('installed', '100'), ('release', '101')]:
                 CFBundleShortVersionString='0.5.0' if build == '100' else '0.5.1',
                 DrapletUpdateTest=True, SUFeedURL='http://127.0.0.1:18734/' + scenario + '/appcast.xml',
                 NSAppTransportSecurity={'NSAllowsLocalNetworking': True})
+    if scenario == 'scheduled':
+        data['SUAutomaticallyUpdate'] = False
     info.write_bytes(plistlib.dumps(data))
-    subprocess.run(['codesign', '--force', '--sign', '-', str(app)], check=True)
+    subprocess.run(['bash', str(root / 'scripts/sign-app.sh'), str(app), os.environ.get('DRAPLET_TEST_SIGNING_IDENTITY', '-')], check=True)
 archive_dir = base / 'feed'
 archive_dir.mkdir(exist_ok=True)
 subprocess.run(['ditto', '-c', '-k', '--sequesterRsrc', '--keepParent',
@@ -45,8 +58,12 @@ if scenario == 'bad-signature':
 http_root = root / '.build/update-test-http'
 http_root.mkdir(exist_ok=True)
 link = http_root / scenario
-if not link.exists():
-    link.symlink_to(archive_dir)
+if link.is_symlink():
+    link.unlink()
+elif link.exists():
+    raise SystemExit('The test HTTP path is not a symlink; refusing to replace it.')
+link.symlink_to(archive_dir)
 if scenario == 'network':
     (archive_dir / 'appcast.xml').rename(archive_dir / 'offline-appcast.xml')
 print(base)
+print('Bundle ID: com.tyrell.Draplet.UpdateTest' + suffix)

@@ -42,9 +42,11 @@ final class Preferences: ObservableObject {
     @Published var rightStatus = "Expanded"
     @Published var paused = false
     @Published var error = ""
+    var needsAccessibility: Bool { !paused && (leftEnabled || rightEnabled) }
     var needsBackground: Bool {
-        !paused && ((leftEnabled && permissionGranted) || (rightEnabled && animation(for: .right) != .hiddenBar))
+        needsAccessibility && permissionGranted && (leftEnabled || (rightEnabled && animation(for: .right) != .hiddenBar))
     }
+    var requiresSetup: Bool { (needsAccessibility && !permissionGranted) || (needsBackground && !backgroundPermission) }
     init(store: UserDefaults = .standard) {
         self.store = store
         store.register(defaults: ["leftEnabled": true, "rightEnabled": true, "autoCollapse": true,
@@ -78,7 +80,8 @@ final class Preferences: ObservableObject {
         animationPace = AnimationPace(rawValue: store.string(forKey: "animationPace") ?? "") ?? .originalLeft
         alwaysHidden = store.bool(forKey: "alwaysHidden")
         fullWidth = store.bool(forKey: "fullWidth")
-        shortcut = store.integer(forKey: "shortcut")
+        let savedShortcut = store.integer(forKey: "shortcut")
+        shortcut = (0...3).contains(savedShortcut) ? savedShortcut : 3
     }
     func icon(for side: BarSide) -> IndicatorStyle { sameIcons ? sharedIcon : (side == .left ? leftIcon : rightIcon) }
     func customIcon(for side: BarSide) -> Data? { sameIcons ? sharedCustomIcon : (side == .left ? leftCustomIcon : rightCustomIcon) }

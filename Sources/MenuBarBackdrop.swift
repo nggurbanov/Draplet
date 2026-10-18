@@ -174,6 +174,7 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var nativeInFlight = false
     private var desktopInFlight = false
     private var refreshAgain = false
+    private var recovery = CaptureRetryPolicy()
     private var active = false
     private var generation = 0
     private let imageContext = CIContext(options: [.cacheIntermediates: false])
@@ -188,7 +189,7 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     func start(mode: BackgroundMode = .cached) {
         if systemPresentationSuspended { self.mode = mode; return }
         if active && self.mode == mode { return }
-        guard failure == nil, permission else { return }
+        guard failure == nil, permission else { self.mode = mode; return }
         if SystemPresentation.current() {
             suspendForSystemPresentation(); watchSystemPresentation(); self.mode = mode; return
         }
@@ -196,6 +197,12 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         if systemPresentationSuspended { self.mode = mode; return }
         watchSystemPresentation()
         self.mode = mode; active = true; generation += 1; let token = generation
+        // A desktop frame without a usable native bar must not leave Setup
+        // spinning forever. Fullscreen return has its own recovery deadline.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self, token == self.generation, self.active, !self.ready else { return }
+            self.fail("macOS did not provide a complete menu-bar background. Please retry.")
+        }
         wallpaper = .current(); scene = .current()
         captureQueue.async { [self] in self.singleFrameCapture = false; self.captureNeedsDesktop = true; self.lastFingerprint = nil }
         Task { @MainActor [weak self] in
@@ -452,10 +459,20 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             self.fail(error.localizedDescription)
         }
     }
-    private func fail(_ message: String) {
-        failure = message; stop()
+    func fail(_ message: String) {
+        let retryDelay = recovery.failed(permissionGranted: permission)
+        failure = message; stop(preservingRecovery: true)
+        let token = generation
         NotificationCenter.default.post(name: Self.didChange, object: nil)
         NSLog("Draplet background capture: %@", message)
+        guard let retryDelay else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + retryDelay) { [weak self] in
+            guard let self, token == self.generation, self.failure != nil,
+                  Preferences.shared.needsBackground, self.permission else { return }
+            self.failure = nil
+            self.start(mode: self.mode)
+            NotificationCenter.default.post(name: Self.didChange, object: nil)
+        }
     }
     private func publish() {
         guard !awaitingNativeAfterPresentation, !awaitingDesktopAfterPresentation, let treatment else { return }
@@ -471,6 +488,7 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             composedImage = context.makeImage()
         }
         guard composedImage != nil else { return }
+        recovery.reset()
         setReady(true)
         if presentationSuppressed && !systemPresentationSuspended {
             presentationSuppressed = false
@@ -507,7 +525,8 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         if SystemPresentation.current() { suspendForSystemPresentation(); return false }
         return true
     }
-    func stop(keepingSnapshot: Bool = false) {
+    func stop(keepingSnapshot: Bool = false, preservingRecovery: Bool = false) {
+        if !preservingRecovery { recovery.reset() }
         generation += 1; active = false; nativeInFlight = false; desktopInFlight = false; refreshAgain = false; filterUpdateInFlight = false
         pendingRefresh?.cancel(); pendingRefresh = nil
         monitor?.invalidate(); monitor = nil; nativeRefresh?.invalidate(); nativeRefresh = nil

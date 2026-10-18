@@ -61,6 +61,9 @@ section, place its dotted divider to the left of the arrow. ⌥-click reveals al
 
 The default shortcut is ⌃⌥Space. Settings provides alternatives.
 Quit Hidden Bar before using Draplet's right-side hiding; both manage the same icons.
+On macOS 26 and earlier, the legacy backend uses the visible vertical divider:
+place it immediately left of the arrow, then ⌘-drag the icons you want hidden to
+its left. Hardware validation of this legacy path is still pending.
 
 ## Updates
 
@@ -92,7 +95,7 @@ Do not disable Gatekeeper or other system protections globally.
 bash test.sh
 ```
 
-The current suite has 124 checks covering icon layout, preferences, rendering,
+The current suite has 139 checks covering icon layout, preferences, rendering,
 transition cancellation, native-engine lifecycle, fullscreen detection and overlay ordering.
 Captured, minimized window-state fixtures cover the Minecraft and Fladder regressions.
 Passing these checks is not a substitute for testing gestures and fullscreen on real hardware.

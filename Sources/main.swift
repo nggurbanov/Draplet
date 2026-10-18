@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var presentationObserver: NSKeyValueObservation?
     var hotkey: EventHotKeyRef?
     var eventHandler: EventHandlerRef?
+    let permissionMonitor = PermissionMonitor()
     var wasAuthorized = false
     var hiddenBarWasRunning = false
     var terminating = false
@@ -65,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didTerminateApplicationNotification, object: nil, queue: .main) { notification in
             if let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {
                 ForegroundFullscreen.shared.forget(pid: app.processIdentifier)
+                SystemPresentation.forgetDock(pid: app.processIdentifier)
             }
         })
         observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { _ in MenuBarBackdrop.shared.checkScene() })
@@ -87,13 +89,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         wasAuthorized = AXIsProcessTrusted()
         hiddenBarWasRunning = right.competingApp != nil
+        permissionMonitor.onChange = { [weak self] state in
+            guard let self, !self.terminating else { return }
+            if self.wasAuthorized != state.accessibility || self.prefs.backgroundPermission != state.screenCapture {
+                self.wasAuthorized = state.accessibility
+                self.applyPreferences()
+            }
+        }
         applyPreferences()
         let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in self?.tick() }
         pulse = timer
         RunLoop.main.add(timer, forMode: .common)
         let firstRun = !UserDefaults.standard.bool(forKey: "hasLaunched")
         UserDefaults.standard.set(true, forKey: "hasLaunched")
-        if firstRun || !wasAuthorized || !prefs.backgroundPermission || CommandLine.arguments.contains("--settings") { settings.show() }
+        if firstRun || prefs.requiresSetup || CommandLine.arguments.contains("--settings") { settings.show() }
         if CommandLine.arguments.contains("--test-controls") { testControls() }
         if let index = CommandLine.arguments.firstIndex(of: "--quit-after"), CommandLine.arguments.count > index + 1,
            let seconds = Double(CommandLine.arguments[index + 1]) {
@@ -111,7 +120,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 .map(\.processIdentifier))
         }
         prefs.backgroundPermission = MenuBarBackdrop.shared.permission
-        if prefs.needsBackground { MenuBarBackdrop.shared.start(mode: prefs.backgroundMode) } else { MenuBarBackdrop.shared.stop() }
+        if prefs.needsBackground && prefs.backgroundPermission { MenuBarBackdrop.shared.start(mode: prefs.backgroundMode) } else { MenuBarBackdrop.shared.stop() }
         if prefs.leftEnabled && !prefs.paused && prefs.permissionGranted && MenuBarBackdrop.shared.ready { left.start() }
         else { left.stop() }
         left.refreshPreferences()
@@ -119,16 +128,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registerShortcut()
     }
     func refreshDisplays() {
+        SystemPresentation.invalidateDisplays()
         left.stop()
         MenuBarBackdrop.shared.restart()
         applyPreferences()
         right.engine.invalidateLayout()
     }
     func tick() {
-        let authorized = AXIsProcessTrusted()
+        permissionMonitor.poll()
         let competing = right.competingApp != nil
-        if wasAuthorized != authorized || hiddenBarWasRunning != competing || prefs.backgroundPermission != MenuBarBackdrop.shared.permission {
-            wasAuthorized = authorized; hiddenBarWasRunning = competing
+        if hiddenBarWasRunning != competing {
+            hiddenBarWasRunning = competing
             applyPreferences()
         }
         MenuBarBackdrop.shared.checkScene()
@@ -186,7 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     func registerShortcut() {
         if let hotkey { UnregisterEventHotKey(hotkey); self.hotkey = nil }
-        guard prefs.shortcut < 3 else { return }
+        guard (0..<3).contains(prefs.shortcut) else { return }
         if eventHandler == nil {
             var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
             let context = Unmanaged.passUnretained(self).toOpaque()
@@ -198,7 +208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let key = [UInt32(kVK_Space), UInt32(kVK_ANSI_D), UInt32(kVK_ANSI_B)][prefs.shortcut]
         let result = RegisterEventHotKey(key, UInt32(controlKey | optionKey), EventHotKeyID(signature: 0x44524150, id: 1), GetApplicationEventTarget(), 0, &hotkey)
-        if result != noErr { prefs.error = "The reveal shortcut is already in use. Choose another in General." }
+        if result != noErr { prefs.error = "The reveal shortcut is already in use. Choose another in Shortcuts." }
     }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { settings?.show(); return true }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -212,6 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !terminating else { return }; terminating = true
         appearanceObserver = nil; presentationObserver = nil
         ForegroundFullscreen.shared.onChange = nil
+        permissionMonitor.stop()
         pulse?.invalidate(); left.stop(); right?.stop(); MenuBarBackdrop.shared.stop()
         if let hotkey { UnregisterEventHotKey(hotkey) }
         if let eventHandler { RemoveEventHandler(eventHandler) }
@@ -248,6 +259,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             "pace": self.prefs.animationPace.rawValue, "leftAnimation": self.prefs.animation(for: .left).rawValue,
                             "backgroundMode": self.prefs.backgroundMode.rawValue, "streaming": MenuBarBackdrop.shared.streaming,
                             "backgroundSnapshots": MenuBarBackdrop.shared.snapshotCount, "backgroundFrames": MenuBarBackdrop.shared.frameCount,
+                            "backgroundError": MenuBarBackdrop.shared.failure ?? "",
                             "backgroundReady": MenuBarBackdrop.shared.ready, "backgroundPermission": MenuBarBackdrop.shared.permission,
                             "systemPresentationSuspended": MenuBarBackdrop.shared.systemPresentationSuspended,
                             "presentationSuppressed": MenuBarBackdrop.shared.presentationSuppressed,
@@ -262,6 +274,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         output["settingsVisible"] = self.settings.window?.isVisible ?? false
                         let data = try! JSONSerialization.data(withJSONObject: output, options: .sortedKeys)
                         print(String(data: data, encoding: .utf8)!, terminator: "\n"); fflush(stdout)
+                    case "update-status":
+                        let update = AppUpdater.shared
+                        let status: [String: Any] = ["status": update.status, "ready": update.readyVersion ?? "",
+                            "pending": update.pendingVersion ?? "", "automaticDownloads": update.automaticDownloads]
+                        let data = try! JSONSerialization.data(withJSONObject: status, options: .sortedKeys)
+                        print(String(decoding: data, as: UTF8.self)); fflush(stdout)
+                    case "capture-failure": MenuBarBackdrop.shared.fail("Injected transient capture interruption (QA)")
                     case "right-click": self.right.toggleItem.button?.performClick(nil)
                     case "expand": self.right.expand()
                     case "collapse": self.right.collapse()

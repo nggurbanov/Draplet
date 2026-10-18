@@ -98,16 +98,16 @@ struct SettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     Text(navigation.page.rawValue).font(.system(size: 25, weight: .bold)).padding(.bottom, 1)
-                    if let version = updates.readyVersion {
+                    if let version = updates.updateVersion {
                         HStack(spacing: 12) {
                             Image(systemName: "arrow.down.circle").font(.title2).foregroundStyle(SettingsPalette.accent)
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("Draplet \(version) is ready").fontWeight(.semibold)
-                                Text("Installs when you quit Draplet. Update now to get the latest fixes.")
+                                Text(updates.readyVersion != nil ? "Draplet \(version) is ready" : "Draplet \(version) is available").fontWeight(.semibold)
+                                Text(updates.readyVersion != nil ? "Installs when you quit Draplet. Update now to get the latest fixes." : "Review the update to download and install the latest fixes.")
                                     .font(.system(size: 12)).foregroundStyle(SettingsPalette.secondary)
                             }
                             Spacer()
-                            Button("Update and Relaunch") { updates.installNow() }
+                            Button(updates.actionTitle) { updates.performUpdateAction() }
                         }.padding(16).background(SettingsPalette.surface, in: RoundedRectangle(cornerRadius: 9))
                     }
                     if prefs.paused {
@@ -124,7 +124,7 @@ struct SettingsView: View {
                     if navigation.page == .appearance || navigation.page == .left || navigation.page == .right {
                         MenuBarPreview(prefs: prefs, expanded: $navigation.previewExpanded)
                     }
-                    if !prefs.permissionGranted || (prefs.needsBackground && (!prefs.backgroundPermission || !prefs.backgroundReady)) {
+                    if prefs.requiresSetup || (prefs.needsBackground && !prefs.backgroundReady) {
                         permissionNotice
                     }
                     switch navigation.page {
@@ -216,9 +216,8 @@ struct SettingsView: View {
             }
             SettingsGroup("Updates") {
                 SettingsRow("Draplet \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")", detail: updates.status) {
-                    Button(updates.readyVersion == nil ? "Check for Updates…" : "Update and Relaunch") {
-                        if updates.readyVersion != nil { updates.installNow() } else { updates.check() }
-                    }.disabled(updates.readyVersion == nil && !updates.canCheck)
+                    Button(updates.actionTitle) { updates.performUpdateAction() }
+                        .disabled(updates.updateVersion == nil && !updates.canCheck)
                 }
                 GroupDivider()
                 toggleRow("Automatically check for updates", detail: "Checks at launch and every hour.",
@@ -326,7 +325,7 @@ struct SettingsView: View {
             } else if !prefs.backgroundPermission {
                 SettingsRow("Enable background matching", detail: "macOS calls this Screen & System Audio Recording. Draplet captures no audio.") { Button("Enable…") { MenuBarBackdrop.shared.requestPermission() } }
             } else {
-                SettingsRow(prefs.backgroundError.isEmpty ? "Preparing the menu-bar background…" : "Background matching is unavailable", detail: prefs.backgroundError.isEmpty ? nil : "Check screen-capture access, then retry.") {
+                SettingsRow(prefs.backgroundError.isEmpty ? "Preparing the menu-bar background…" : "Background matching is unavailable", detail: prefs.backgroundError.isEmpty ? nil : prefs.backgroundError) {
                     if prefs.backgroundError.isEmpty { ProgressView().controlSize(.small) }
                     else {
                         Button("Check Access…") { MenuBarBackdrop.shared.requestPermission() }

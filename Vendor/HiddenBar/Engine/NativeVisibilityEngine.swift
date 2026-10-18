@@ -102,7 +102,7 @@ final class NativeVisibilityEngine: MenuBarEngine {
         withLayout { [weak self] layout in
             guard let self = self else { return }
             guard let layout = layout else {
-                self.logUnavailableOnce("the arrow's position cannot be read yet")
+                self.logUnavailableOnce("the menu-bar sections could not be read; icons remain visible")
                 self.state = .expanded
                 return completion(.unavailable)
             }
@@ -173,6 +173,9 @@ final class NativeVisibilityEngine: MenuBarEngine {
         let generation = self.generation
         inventory.snapshot { [weak self] inventory in
             guard let self = self, generation == self.generation else { return }
+            // A timeout or transient AX failure can yield no items. An empty
+            // allow-list would hide every third-party icon, including visible ones.
+            guard !inventory.isEmpty else { self.layout = nil; body(nil); return }
             let layout = MenuBarLayoutResolver.resolve(inventory: inventory,
                                                        separatorFrame: boundary,
                                                        alwaysHiddenSeparatorFrame: alwaysHiddenFrame,

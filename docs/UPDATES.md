@@ -9,8 +9,9 @@ background. A verified, staged update installs on ordinary exit without relaunch
 “Update and Relaunch” installs immediately and reopens Draplet. Ready updates are
 visible on every Settings page. The reminder can be deferred for one hour; fullscreen
 and Mission Control postpone it. Turning off automatic checks stops scheduled checks;
-manual checks remain available. Turning off background downloads leaves downloading
-to Sparkle’s manual update flow. Already staged updates remain scheduled for exit.
+manual checks remain available. With background downloads off, a persistent Settings
+action and a deferrable reminder open Sparkle’s review/download flow. Already staged
+updates remain scheduled for exit.
 
 Archives are Ed25519-signed and verified before extraction. This signature protects
 updates; it does not replace Developer ID/notarization or remove initial Gatekeeper
@@ -39,8 +40,9 @@ on this feed; key rotation requires a separately tested migration.
 ## Isolated update fixture
 
 Build an ad-hoc app with `DRAPLET_SIGNING_IDENTITY=- bash build.sh`, then run
-`python3 scripts/prepare-update-test.py [good|bad-signature|network]`. Serve
-`.build/update-test-http` on loopback port 18734. The fixtures have separate bundle
+`python3 scripts/prepare-update-test.py [good|bad-signature|network|scheduled]`. Serve
+`.build/update-test-http` on loopback port 18734. `scheduled` disables background downloads to exercise the review/reminder flow.
+The fixtures have separate bundle
 identifiers and never start menu-bar engines, capture or permission prompts.
 They exercise the full app binary, Sparkle framework and real installer helpers.
 `bad-signature` modifies the archive after signing; `network` serves a missing feed.
@@ -48,3 +50,8 @@ The installed fixture must remain build 100 after either failure. The successful
 fixture updates from build 100 to 101; ordinary quit must leave it closed, while
 Update and Relaunch must start a new process. Test settings preservation as well.
 Only test bundle plists allow local HTTP. Production always uses the HTTPS feed.
+
+Fixtures re-sign the entire helper graph through `scripts/sign-app.sh`. They refuse
+to overwrite a running host. Use an alphanumeric `DRAPLET_TEST_RUN_ID` for a fresh
+bundle/cache identity, or `DRAPLET_TEST_SIGNING_IDENTITY=auto` to exercise the local
+Apple Development graph. Ad-hoc is the default; do not mix helper and host identities.
