@@ -1,5 +1,10 @@
 # Draplet
 
+![Schematic demonstration of Draplet revealing both sides of the menu bar and Command-dragging a status icon into Pocket and back](docs/assets/draplet-demo.gif)
+
+*Schematic demonstration with fictional content; no screen recording.*
+[MP4 version](docs/assets/draplet-demo.mp4) · [Animation source and export instructions](media/demo)
+
 <img src="Resources/Brand/Draplet.png" width="96" alt="Draplet app icon">
 
 A free, open-source macOS utility that keeps both sides of your menu bar tidy.
@@ -11,11 +16,6 @@ Alpha downloads are not Developer ID signed or notarized.
 
 [Download 0.5.0 Alpha](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.0)
 (Apple silicon).
-
-![Schematic demonstration of Draplet revealing both sides of the menu bar and Command-dragging a status icon into Pocket and back](docs/assets/draplet-demo.gif)
-
-*Schematic demonstration with fictional content; no screen recording.*
-[MP4 version](docs/assets/draplet-demo.mp4) · [Animation source and export instructions](media/demo)
 
 
 ## Features
