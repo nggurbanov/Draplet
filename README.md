@@ -4,8 +4,6 @@
 
 *Schematic demonstration with fictional content; no screen recording.*
 
-[MP4 version](docs/assets/draplet-demo.mp4) · [Animation source and export instructions](media/demo)
-
 <img src="Resources/Brand/Draplet.png" width="96" alt="Draplet app icon">
 
 A free, open-source macOS utility that keeps both sides of your menu bar tidy.
