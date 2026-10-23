@@ -21,5 +21,6 @@ if [ -f "updates/$version.html" ]; then cp "updates/$version.html" "$staging/Dra
   --link https://github.com/nggurbanov/Draplet \
   --download-url-prefix "https://github.com/nggurbanov/Draplet/releases/download/v$version/" "$staging"
 cp "$staging/appcast.xml" "dist/appcast-$version.xml"
-(cd dist && shasum -a 256 "Draplet-$version.dmg" "$archive" > "Draplet-$version.sha256")
+python3 scripts/prepare-source.py
+(cd dist && shasum -a 256 "Draplet-$version.dmg" "$archive" "Draplet-$version-source.tar.gz" > "Draplet-$version.sha256")
 echo "Prepared $version. Publish release assets before replacing updates/appcast.xml with dist/appcast-$version.xml."

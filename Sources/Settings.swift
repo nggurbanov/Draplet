@@ -19,6 +19,7 @@ enum SettingsPage: String, CaseIterable {
 final class SettingsNavigation: ObservableObject {
     @Published var page: SettingsPage = .appearance
     @Published var previewExpanded = false
+    let pocketPlacement = PocketPlacementModel()
 }
 
 enum SettingsPalette {
@@ -47,7 +48,7 @@ enum SettingsPalette {
     })
 }
 
-private struct SettingsGroup<Content: View>: View {
+struct SettingsGroup<Content: View>: View {
     let title: String
     let content: Content
     init(_ title: String, @ViewBuilder content: () -> Content) { self.title = title; self.content = content() }
@@ -61,7 +62,7 @@ private struct SettingsGroup<Content: View>: View {
     }
 }
 
-private struct SettingsRow<Content: View>: View {
+struct SettingsRow<Content: View>: View {
     let title: String
     let detail: String?
     let content: Content
@@ -80,7 +81,7 @@ private struct SettingsRow<Content: View>: View {
     }
 }
 
-private struct GroupDivider: View {
+struct GroupDivider: View {
     var body: some View { Divider().padding(.horizontal, 14) }
 }
 
@@ -273,13 +274,14 @@ struct SettingsView: View {
                 GroupDivider()
                 sideTriggerRow(.right)
             }
-            SettingsGroup("Reveal destination") {
-                SettingsRow("Show hidden icons in", detail: "Pocket puts your icons in a grid below the menu bar, clear of the notch. Choose Menu Bar to keep the original reveal.") {
-                    Picker("Reveal destination", selection: $prefs.rightRevealMode) {
-                        ForEach(RightRevealMode.allCases, id: \.self) { Text($0.title).tag($0) }
-                    }.labelsHidden().pickerStyle(.segmented).frame(width: 220)
+            SettingsGroup("Overflow") {
+                SettingsRow("Use Pocket", detail:"The horizontal arrow reveals the normal menu-bar section. The down arrow opens pinned apps and icons that don’t fit.") {
+                    Toggle("Use Pocket",isOn:Binding(get:{ prefs.rightRevealMode == .pocket },set:{ prefs.rightRevealMode = $0 ? .pocket : .menuBar })).labelsHidden().toggleStyle(.switch)
                 }
+                GroupDivider()
+                SettingsRow("Arrange icons in the menu bar", detail:"Hold ⌘ while dragging in either direction: into Pocket to pin an app, or back up to the menu bar to return it. You can also use the icon’s right-click menu. Apps return to their original section; icons that don’t fit stay in automatic overflow.") { EmptyView() }
             }
+            PocketPlacementSettings(prefs: prefs, model: navigation.pocketPlacement)
             SettingsGroup("Auto-hide") {
                 toggleRow("Automatically hide after leaving", binding: $prefs.autoCollapse)
                 if prefs.autoCollapse {

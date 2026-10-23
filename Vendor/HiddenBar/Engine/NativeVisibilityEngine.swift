@@ -50,7 +50,18 @@ final class NativeVisibilityEngine: MenuBarEngine {
     private(set) var layout: MenuBarLayout?
     private(set) var layoutInventory: [MenuBarInventoryItem] = []
 
+    private var captureRestoreState: MenuBarEngineState?
+    private var pocketOnlyBundles = Set<String>()
+    private var pocketOwners: [String:[String]] = [:]
+    private var placementRevision = 0
+    private var placementWaiters: [() -> Void] = []
     private var assertion: NativeVisibilityAssertion?
+    var hasVisibilityRestriction: Bool { assertion != nil }
+    var pocketCaptureRestoresRestriction: Bool {
+        if captureRestoreState == .collapsed { return true }
+        return (!pocketOnlyBundles.isEmpty && !pocketOwners.isEmpty)
+            || (alwaysHiddenEnabled && alwaysHiddenSeparatorHidden)
+    }
     // Bumped whenever a pending activation must no longer win (an expand, a newer
     // activation); a late success is then invalidated straight away.
     private var generation = 0
@@ -63,13 +74,13 @@ final class NativeVisibilityEngine: MenuBarEngine {
          inventory: MenuBarInventoryProviding = AccessibilityMenuBarInventory(),
          visibility: NativeVisibilityProviding = NativeVisibilityBridge(),
          ownBundleIdentifier: String? = Bundle.main.bundleIdentifier,
-         itemFrame: @escaping (NSStatusItem) -> CGRect? = { $0.button?.window?.frame },
+         itemFrame: ((NSStatusItem) -> CGRect?)? = nil,
          isLTR: @escaping () -> Bool = { Constant.isUsingLTRLanguage }) {
         self.items = items
         self.inventory = inventory
         self.visibility = visibility
         self.ownBundleIdentifier = ownBundleIdentifier
-        self.itemFrame = itemFrame
+        self.itemFrame = itemFrame ?? { [weak items] in items?.statusItemFrame($0) }
         self.isLTR = isLTR
         items.separatorItem.isVisible = false
     }
@@ -119,12 +130,18 @@ final class NativeVisibilityEngine: MenuBarEngine {
     }
 
     func expand() {
+        expand { _ in }
+    }
+
+    func expand(completion: @escaping (Bool) -> Void) {
+        captureRestoreState = nil
         setSeparatorsVisible(true)
         state = .expanded
-        applyExpandedPresentation()
+        applyExpandedPresentation(completion:completion)
     }
 
     func updateAlwaysHiddenSection(enabled: Bool, separatorHidden: Bool) {
+        guard enabled != alwaysHiddenEnabled || separatorHidden != alwaysHiddenSeparatorHidden else { return }
         alwaysHiddenEnabled = enabled
         alwaysHiddenSeparatorHidden = separatorHidden
         if state != .collapsed {
@@ -146,16 +163,36 @@ final class NativeVisibilityEngine: MenuBarEngine {
     // Expanded shows the hidden section; the always-hidden section stays hidden
     // while "hide separators" is on, otherwise everything is revealed by dropping
     // the restriction altogether.
-    private func applyExpandedPresentation() {
+    private func applyExpandedPresentation(completion: @escaping (Bool) -> Void = { _ in }) {
+        if !pocketOnlyBundles.isEmpty, !pocketOwners.isEmpty, visibility.isAvailable, inventory.isAuthorized {
+            // A display/backdrop restart can expand while placement is still
+            // reading an unrestricted bar. Do not supersede that read with a
+            // pin restriction and leave collapse with no original section map.
+            if layout == nil {
+                if assertion != nil { releaseAssertion() }
+                withLayout { [weak self] layout in
+                    guard let self else { completion(false); return }
+                    guard layout != nil else {
+                        self.releaseAssertion(); completion(false); return
+                    }
+                    self.applyExpandedPresentation(completion:completion)
+                }
+                return
+            }
+            let excluded = alwaysHiddenEnabled && alwaysHiddenSeparatorHidden ? Set(layout?.bundles(in: [.alwaysHidden]) ?? []) : []
+            let allowed = pocketOwners.keys.filter { !excluded.contains($0) }.sorted()
+            activate(allowing: allowed, onSuperseded:{ completion(false) }, completion:completion)
+            return
+        }
         guard alwaysHiddenEnabled && alwaysHiddenSeparatorHidden, visibility.isAvailable, inventory.isAuthorized else {
-            return releaseAssertion()
+            releaseAssertion(); completion(true); return
         }
         withLayout { [weak self] layout in
             guard let self = self else { return }
             guard let layout = layout else {
-                return self.releaseAssertion()
+                self.releaseAssertion(); completion(false); return
             }
-            self.activate(allowing: layout.bundles(in: [.visible, .hidden])) { _ in }
+            self.activate(allowing: layout.bundles(in: [.visible, .hidden]), onSuperseded:{ completion(false) }, completion:completion)
         }
     }
 
@@ -166,10 +203,7 @@ final class NativeVisibilityEngine: MenuBarEngine {
         if assertion != nil {
             return body(layout)
         }
-        guard let arrow = items?.toggleItem,
-              let boundary = itemFrame(arrow) else { return body(nil) }
-        let alwaysHiddenFrame = alwaysHiddenEnabled ? items?.alwaysHiddenItem.flatMap(itemFrame) : nil
-        let isLTR = self.isLTR()
+        guard let arrow = items?.toggleItem else { return body(nil) }
         generation += 1
         let generation = self.generation
         inventory.snapshot { [weak self] inventory in
@@ -177,6 +211,12 @@ final class NativeVisibilityEngine: MenuBarEngine {
             // A timeout or transient AX failure can yield no items. An empty
             // allow-list would hide every third-party icon, including visible ones.
             guard !inventory.isEmpty else { self.layout = nil; body(nil); return }
+            // Initial status-item hosting can finish while Accessibility walks
+            // the other publishers. Compare that inventory with the settled
+            // boundary, not the arrow's earlier placeholder/backing position.
+            guard let boundary = self.itemFrame(arrow) else { self.layout = nil;body(nil);return }
+            let alwaysHiddenFrame = self.alwaysHiddenEnabled ? self.items?.alwaysHiddenItem.flatMap(self.itemFrame) : nil
+            let isLTR = self.isLTR()
             self.layoutInventory = inventory
             let layout = MenuBarLayoutResolver.resolve(inventory: inventory,
                                                        separatorFrame: boundary,
@@ -191,15 +231,27 @@ final class NativeVisibilityEngine: MenuBarEngine {
 
     // Activates the new restriction before dropping the old one, so switching
     // between collapsed and expanded never flashes the whole bar visible.
-    private func activate(allowing bundles: [String], onSuperseded: @escaping () -> Void = {}, completion: @escaping (Bool) -> Void) {
+    private func activate(allowing bundles: [String], includingPocket: Bool = false, preservingSystemItems: Bool = false, onSuperseded: @escaping () -> Void = {}, completion: @escaping (Bool) -> Void) {
         generation += 1
         let generation = self.generation
-        let allowed = (ownBundleIdentifier.map { [$0] } ?? []) + bundles
-        visibility.activate(allowedSystemItems: Self.systemItemsToKeep,
+        let placement = placementRevision
+        let pinnedIdentifiers = Set(pocketOnlyBundles.flatMap { pocketOwners[$0] ?? [$0] })
+        let allowed = (ownBundleIdentifier.map { [$0] } ?? []) + Array(Set(bundles.flatMap { pocketOwners[$0] ?? [$0] })).filter {
+            includingPocket || !pinnedIdentifiers.contains($0)
+        }.sorted()
+        // Capture exposes one app behind a frozen strip. Temporarily make room
+        // by hiding system extras too; otherwise later siblings can be parked
+        // under the native overflow button and get photographed as that button.
+        visibility.activate(allowedSystemItems: includingPocket && !preservingSystemItems ? [] : Self.systemItemsToKeep,
                             allowedBundleIdentifiers: allowed) { [weak self] result in
             guard let self = self, generation == self.generation else {
                 if case .success(let stale) = result { stale.invalidate() }
                 onSuperseded()
+                return
+            }
+            if placement != self.placementRevision {
+                if case .success(let stale) = result { stale.invalidate() }
+                self.activate(allowing: bundles, includingPocket: includingPocket, preservingSystemItems:preservingSystemItems, onSuperseded: onSuperseded, completion: completion)
                 return
             }
             switch result {
@@ -208,6 +260,7 @@ final class NativeVisibilityEngine: MenuBarEngine {
                 self.assertion = newAssertion
                 old?.invalidate()
                 completion(true)
+                if generation == self.generation { self.finishPlacementWaiters() }
             case .failure(let error):
                 // Fail open: never leave icons hidden after an error.
                 NSLog("NativeVisibility: activation failed: \(error.localizedDescription)")
@@ -234,6 +287,64 @@ final class NativeVisibilityEngine: MenuBarEngine {
         }
     }
 
+    // Capture borrows visibility without changing the user's reveal state/layout.
+    func stagePocketCapture(_ identifiers: [String], preservingVisible: Bool = false, completion: @escaping (Bool) -> Void) {
+        guard state == .expanded || state == .collapsed else { completion(false); return }
+        if captureRestoreState == nil { captureRestoreState = state }
+        let visible = preservingVisible ? layout?.bundles(in:[.visible]) ?? [] : []
+        activate(allowing: identifiers+visible, includingPocket: true, preservingSystemItems:preservingVisible, onSuperseded: { completion(false) }, completion: completion)
+    }
+    // Some third-party status providers disappear under an allow-list even
+    // when their published identifiers are allowed. A bounded capture fallback
+    // can borrow the unrestricted bar behind the existing one-shot shield.
+    // Keep the original sections and restore state exactly as for staged capture.
+    func stageUnrestrictedPocketCapture() -> Bool {
+        guard state == .expanded || state == .collapsed, visibility.isAvailable, inventory.isAuthorized else { return false }
+        if captureRestoreState == nil { captureRestoreState = state }
+        releaseAssertion()
+        return true
+    }
+    // The explicit Pocket destination is independent of the user's native
+    // divider layout. Capture may borrow a pinned owner, then restores this policy.
+    func updatePocketPlacement(pinned: Set<String>, owners: [String:[String]], completion: @escaping () -> Void = {}) {
+        guard pinned != pocketOnlyBundles || owners != pocketOwners else {
+            if placementWaiters.isEmpty { completion() }
+            else { placementWaiters.append(completion) }
+            return
+        }
+        placementWaiters.append(completion)
+        pocketOnlyBundles = pinned; pocketOwners = owners
+        placementRevision += 1
+        // Capture owns a temporary layout until finishPocketCapture. An inventory
+        // refresh must not replace that exposure halfway through a screenshot.
+        guard captureRestoreState == nil else { return }
+        switch state {
+        case .expanded:
+            if !pinned.isEmpty, layout == nil, assertion == nil {
+                withLayout { [weak self] _ in self?.applyExpandedPresentation() }
+            } else { applyExpandedPresentation() }
+        case .collapsed:
+            if let layout {
+                activate(allowing: layout.bundles(in: [.visible])) { [weak self] success in
+                    if !success { self?.state = .expanded }
+                }
+            } else { finishPlacementWaiters() }
+        case .calibrating: break // The in-flight activation retries its placement revision.
+        case .unavailable: finishPlacementWaiters()
+        }
+    }
+    func finishPocketCapture(completion: @escaping (Bool) -> Void = { _ in }) {
+        guard let previous = captureRestoreState else { completion(true); return }
+        captureRestoreState = nil
+        if previous == .expanded { applyExpandedPresentation(completion:completion) }
+        else if let layout {
+            activate(allowing: layout.bundles(in: [.visible]), onSuperseded:{ completion(false) }) { [weak self] success in
+                if !success { self?.state = .expanded }
+                completion(success)
+            }
+        } else { releaseAssertion(); state = .expanded; completion(false) }
+    }
+
     // The always-hidden separator goes to zero width rather than isVisible =
     // false, which would make macOS forget where the user placed it.
     private func setSeparatorsVisible(_ visible: Bool) {
@@ -254,6 +365,11 @@ final class NativeVisibilityEngine: MenuBarEngine {
         generation += 1
         assertion?.invalidate()
         assertion = nil
+        finishPlacementWaiters()
+    }
+    private func finishPlacementWaiters() {
+        let waiters = placementWaiters; placementWaiters = []
+        waiters.forEach { $0() }
     }
 
     // Logged when the reason changes, so a retried collapse does not spam.

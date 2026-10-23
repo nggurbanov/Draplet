@@ -4,30 +4,32 @@ import AppKit
 // Keep antialiasing as alpha, including white-on-black and black-on-light icons.
 // Blank snapshots are rejected; they must never masquerade as a captured icon.
 enum PocketImage {
-    // Keep only a small raster in the tray cache, rather than retaining every
-    // application's full multi-resolution artwork for the lifetime of Draplet.
-    static func appArtwork(_ source: NSImage) -> NSImage {
-        guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 48, pixelsHigh: 48,
-            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
-              let context = NSGraphicsContext(bitmapImageRep: bitmap) else { return source }
-        NSGraphicsContext.saveGraphicsState(); NSGraphicsContext.current = context
-        context.imageInterpolation = .high
-        source.draw(in: NSRect(x: 0, y: 0, width: 48, height: 48), from: .zero, operation: .copy, fraction: 1)
-        NSGraphicsContext.restoreGraphicsState()
-        let image = NSImage(size: NSSize(width: 24, height: 24)); image.addRepresentation(bitmap)
-        return image
-    }
-
     static func isMonochrome(_ image: CGImage) -> Bool {
-        guard let data = image.dataProvider?.data, let p = CFDataGetBytePtr(data), image.bitsPerPixel == 32, CFDataGetLength(data) >= image.bytesPerRow * image.height else { return false }
+        // A CGImage crop may retain its original row stride but omit padding
+        // after the last pixel. Only bytes actually visited must be present.
+        guard image.width > 0, image.height > 0, image.bitsPerPixel == 32,
+              let data = image.dataProvider?.data, let p = CFDataGetBytePtr(data),
+              CFDataGetLength(data) >= (image.height-1)*image.bytesPerRow+image.width*4 else { return false }
+        var minimum = [255,255,255], maximum = [0,0,0]
         for row in 0..<image.height {
             for x in 0..<image.width {
                 let i = row * image.bytesPerRow + x * 4
-                if p[i+3] > 32 && max(p[i], p[i+1], p[i+2]) - min(p[i], p[i+1], p[i+2]) > 12 { return false }
+                if p[i+3] > 96 {
+                    let rgb = (0..<3).map { min(255, Int(p[i+$0]) * 255 / Int(p[i+3])) }
+                    if rgb.max()! - rgb.min()! > 12 { return false }
+                    for c in 0..<3 { minimum[c] = min(minimum[c], rgb[c]); maximum[c] = max(maximum[c], rgb[c]) }
+                }
             }
         }
-        return true
+        return (0..<3).allSatisfy { maximum[$0] - minimum[$0] < 24 }
+    }
+    static func trim(_ image: CGImage) -> CGImage? {
+        guard let data = image.dataProvider?.data, let p = CFDataGetBytePtr(data), image.bitsPerPixel == 32 else { return nil }
+        var left = image.width, right = -1
+        for y in 0..<image.height { for x in 0..<image.width where p[y * image.bytesPerRow + x * 4 + 3] > 8 { left = min(left,x); right = max(right,x) } }
+        guard right >= left else { return nil }
+        left = max(0,left - 2); right = min(image.width - 1,right + 2)
+        return image.cropping(to: CGRect(x: left, y: 0, width: right - left + 1, height: image.height))
     }
     static func isolate(_ image: CGImage) -> CGImage? {
         let width = image.width, height = image.height
@@ -55,12 +57,17 @@ enum PocketImage {
             if sourceAlpha < 0.99 { if sourceAlpha > 0.08 { ink += 1 }; continue }
             let rgb = (0..<3).map { Double(bytes[index + $0]) }
             var alpha = 0.0
+            var difference = 0.0
             for c in 0..<3 {
                 let distance = rgb[c] - background[c]
+                difference = max(difference,abs(distance))
                 let range = distance >= 0 ? 255 - background[c] : background[c]
                 if range > 0 { alpha = max(alpha, abs(distance) / range) }
             }
-            if alpha < 0.06 { for c in 0..<4 { bytes[index + c] = 0 }; continue }
+            // Near black/white, a one-level native background fluctuation can
+            // divide by a range of one and become fully opaque "ink". Reject
+            // this quantization noise before it changes the extracted bounds.
+            if difference <= 2 || alpha < 1.0 / 255 { for c in 0..<4 { bytes[index + c] = 0 }; continue }
             alpha = min(1, alpha); ink += 1
             for c in 0..<3 { bytes[index + c] = UInt8(max(0, min(255 * alpha, (rgb[c] - background[c] * (1 - alpha))).rounded())) }
             bytes[index + 3] = UInt8((255 * alpha).rounded())

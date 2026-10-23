@@ -97,6 +97,11 @@ final class Items: MenuBarItemProvider {
     let toggleItem = NSStatusBar.system.statusItem(withLength: 20)
     let separatorItem = NSStatusBar.system.statusItem(withLength: 20)
     let alwaysHiddenItem: NSStatusItem? = nil
+    var readFrame:((NSStatusItem)->CGRect?)?
+    func statusItemFrame(_ item:NSStatusItem) -> CGRect? {
+        if let readFrame { return readFrame(item) }
+        return item.button?.window?.frame
+    }
     deinit { NSStatusBar.system.removeStatusItem(toggleItem); NSStatusBar.system.removeStatusItem(separatorItem) }
 }
 final class Inventory: MenuBarInventoryProviding {
@@ -114,8 +119,12 @@ final class Visibility: NativeVisibilityProviding {
     var isAvailable = true
     var callback: ((Result<NativeVisibilityAssertion, Error>) -> Void)?
     var allowed: [String] = []
+    var systemItems: [Int] = []
+    var activations = 0
     func activate(allowedSystemItems: [Int], allowedBundleIdentifiers: [String], completion: @escaping (Result<NativeVisibilityAssertion, Error>) -> Void) {
+        activations += 1
         allowed = allowedBundleIdentifiers; callback = completion
+        systemItems = allowedSystemItems
     }
     func finish(_ result: Result<NativeVisibilityAssertion, Error>) { let completion = callback; callback = nil; completion?(result) }
 }
@@ -133,6 +142,7 @@ check(!invalidPrefs.needsBackground, "Without Accessibility no hiding engine nee
 invalidPrefs.permissionGranted = true
 invalidPrefs.backgroundPermission = false
 invalidPrefs.rightAnimation = .hiddenBar
+invalidPrefs.rightRevealMode = .menuBar
 check(!invalidPrefs.requiresSetup, "Native right-only hiding does not demand unused screen-capture permission on every launch")
 invalidStore.removePersistentDomain(forName: invalidSuite)
 var permissionReplies: [(PermissionState) -> Void] = []
@@ -347,12 +357,111 @@ if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
     curtain.syncVisibility(); curtain.updateClickTarget(); curtain.tick()
     check(!testPanel.isVisible && curtain.clickPanel?.isVisible == false,
           "Native fullscreen removes both the drawn app title and its toggle; visibility polling cannot bring them back")
-    curtain.setPresentationSuppressed(false)
+    curtain.setPresentationSuppressed(false, presentationActive: { false })
     check(testPanel.isVisible && curtain.clickPanel?.isVisible == true,
           "Restoring the desktop returns both left windows after presentation is allowed")
     curtain.stop()
 }
 let emptyItems = Items(), emptyReader = Inventory(), emptyBridge = Visibility()
+do {
+    let slot = CGRect(x:600,y:0,width:42,height:33),point = CGPoint(x:621,y:16)
+    var policy = StatusItemClickPolicy()
+    func route(_ type:CGEventType,_ point:CGPoint,flags:CGEventFlags = [],programmatic:Bool = false,frame:CGRect? = slot,blocked:Bool = true) -> StatusItemClickPolicy.Result {
+        policy.route(type,point:point,flags:flags,programmatic:programmatic,frame:frame,obstructed:blocked)
+    }
+    if case .pass = route(.leftMouseDown,point,blocked:false) {} else { preconditionFailure("Unobstructed native down intercepted") }
+    check({ if case .pass = route(.leftMouseUp,point) { return true };return false }(),"Unobstructed foreign native status icons retain their original delivery")
+    check({ if case .pass = route(.leftMouseDown,CGPoint(x:650,y:16)) { return true };return false }(),"A neighbouring status icon is never claimed")
+    check({ if case .consume = route(.leftMouseDown,point) { return true };return false }(),"An obstructed owned arrow claims its down before the foreign window")
+    check({ if case let .click(.left,flags) = route(.leftMouseUp,point,flags:.maskAlternate) { return flags.contains(.maskAlternate) };return false }(),"The balanced release opens Draplet once and preserves Option")
+    check({ if case .pass = route(.leftMouseUp,point) { return true };return false }(),"A second release cannot toggle the arrow again")
+    check({ if case .pass = route(.leftMouseDown,point,flags:.maskCommand) { return true };return false }(),"Command status-item drags keep their native mouse-down")
+    check({ if case .pass = route(.leftMouseUp,point,flags:.maskCommand) { return true };return false }(),"Command status-item drags keep their native release")
+    check({ if case .pass = route(.leftMouseDown,point,programmatic:true) { return true };return false }(),"Tagged native placement cannot become an ordinary arrow click")
+    _ = route(.leftMouseDown,point);_ = route(.leftMouseDragged,CGPoint(x:700,y:60))
+    check({ if case .consume = route(.leftMouseUp,CGPoint(x:700,y:60)) { return true };return false }(),"Dragging off the arrow cancels its action without leaking an orphan release")
+    _ = route(.rightMouseDown,point)
+    check({ if case .click(.right,_) = route(.rightMouseUp,point) { return true };return false }(),"Right-click retains the Draplet context-menu action")
+    _ = route(.leftMouseDown,point);policy.invalidate()
+    check({ if case .consume = route(.leftMouseUp,point) { return true };return false }(),"Presentation or Command changes cancel a pending click")
+    _ = route(.leftMouseDown,point)
+    check({ if case .consume = route(.leftMouseUp,point,frame:nil) { return true };return false }(),"A vanished native arrow never activates another control on release")
+    func window(_ pid:pid_t,_ layer:Int) -> WindowServerSnapshot.Window {
+        WindowServerSnapshot.Window([kCGWindowOwnerPID:pid,kCGWindowNumber:1,kCGWindowLayer:layer,
+                                     kCGWindowBounds:slot.dictionaryRepresentation,kCGWindowAlpha:1] as NSDictionary)!
+    }
+    check(StatusItemClickPolicy.obstructed(point,windows:[window(43,26)],owner:42),"A foreign status hit window is recognized above the native bar")
+    check(!StatusItemClickPolicy.obstructed(point,windows:[window(42,27),window(43,24)],owner:42),"Own covers and lower windows do not steal native delivery")
+    check(!StatusItemClickPolicy.obstructed(point,windows:[window(43,26)],owner:43,routerOwner:42,eligibleOwners:[43]),
+          "A visible publisher keeps clicks on its own custom hit window")
+    check(StatusItemClickPolicy.obstructed(point,windows:[window(43,26)],owner:44,routerOwner:42,eligibleOwners:[43]),
+          "A managed foreign publisher cannot intercept another rendered status icon")
+    check(!StatusItemClickPolicy.obstructed(point,windows:[window(43,26)],owner:44,routerOwner:42,eligibleOwners:[45]),
+          "Unrelated application overlays are not treated as hidden status-item windows")
+    check(!StatusItemClickPolicy.obstructed(point,windows:[window(42,27),window(43,26)],owner:44,routerOwner:42,eligibleOwners:[43]),
+          "Pocket's own frontmost down-arrow receives its click instead of the native item below")
+    check(!StatusItemClickPolicy.obstructed(point,windows:[window(45,101),window(43,26)],owner:44,routerOwner:42,eligibleOwners:[43]),
+          "An actual popup above the menu bar retains native input")
+    check(StatusItemClickPolicy.canClaimToggle(point,windows:[],owner:42),
+          "The owned toggle can handle an ordinary press without the system bezel")
+    check(StatusItemClickPolicy.canClaimToggle(point,windows:[window(43,26)],owner:42),
+          "A stale foreign hit window does not restore the toggle's native press bezel")
+    check(!StatusItemClickPolicy.canClaimToggle(point,windows:[window(42,27)],owner:42),
+          "The toggle's cached rectangle cannot steal input from a frontmost owned control")
+    check(!StatusItemClickPolicy.canClaimToggle(point,windows:[window(43,101)],owner:42),
+          "The toggle cannot steal input from an actual popup above it")
+    _ = policy.route(.leftMouseDown,point:point,flags:[],programmatic:false,frame:slot,identity:"first",obstructed:true)
+    check({ if case .consume = policy.route(.leftMouseUp,point:point,flags:[],programmatic:false,frame:slot,identity:"second",obstructed:true) { return true };return false }(),
+          "A different publisher in the same rectangle cannot inherit a swallowed mouse-down")
+    _ = policy.route(.leftMouseDown,point:point,flags:[],programmatic:false,frame:slot,identity:"first",obstructed:true)
+    check({ if case .consume = policy.route(.leftMouseUp,point:point,flags:[],programmatic:false,frame:slot.offsetBy(dx:1,dy:0),identity:"first",obstructed:true) { return true };return false }(),
+          "A reflow during the held click cancels activation even when the two slots overlap")
+}
+let settlingItems = Items(), settlingReader = Inventory(), settlingVisibility = Visibility()
+var settlingBoundary = frame(900)
+let startupBoundaryEngine = NativeVisibilityEngine(items:settlingItems,inventory:settlingReader,visibility:settlingVisibility,
+                                           ownBundleIdentifier:"own",itemFrame:{ _ in settlingBoundary },isLTR:{ true })
+startupBoundaryEngine.collapse { _ in }
+settlingBoundary = frame(600)
+settlingReader.finish([MenuBarInventoryItem(bundleIdentifier:"com.apple.TextInputMenuAgent",frame:frame(700)),
+                       MenuBarInventoryItem(bundleIdentifier:"hidden",frame:frame(500))])
+check(settlingVisibility.allowed.contains("com.apple.TextInputMenuAgent") && !settlingVisibility.allowed.contains("hidden"),
+      "Startup reflow keeps the language item right of the settled arrow visible")
+settlingVisibility.finish(.success(Handle()))
+startupBoundaryEngine.expand()
+do {
+    let providerItems = Items(),providerReader = Inventory(),providerBridge = Visibility()
+    providerItems.readFrame = { _ in frame(610) }
+    let providerEngine = NativeVisibilityEngine(items:providerItems,inventory:providerReader,visibility:providerBridge,
+                                               ownBundleIdentifier:"own",isLTR:{ true })
+    providerEngine.collapse { _ in }
+    providerReader.finish([MenuBarInventoryItem(bundleIdentifier:"com.apple.TextInputMenuAgent",frame:frame(650)),
+                           MenuBarInventoryItem(bundleIdentifier:"hidden",frame:frame(500))])
+    check(providerBridge.allowed.contains("com.apple.TextInputMenuAgent") && !providerBridge.allowed.contains("hidden"),
+          "The production engine uses the controller's hosted boundary instead of the stale NSStatusItem backing window")
+    providerBridge.finish(.success(Handle()));providerEngine.expand()
+    providerItems.readFrame = { _ in nil }
+    var result:CollapseResult?
+    providerEngine.collapse { result = $0 }
+    providerReader.finish([MenuBarInventoryItem(bundleIdentifier:"com.apple.TextInputMenuAgent",frame:frame(650))])
+    check(result == .unavailable && providerBridge.callback == nil,
+          "Missing verified hosting geometry fails open rather than guessing the language item's section")
+}
+do {
+    let reconciled = HostedMenuBarInventoryPolicy.reconcile([
+        MenuBarInventoryItem(bundleIdentifier:"input",frame:frame(1196)),
+        MenuBarInventoryItem(bundleIdentifier:"overflow",frame:frame(800)),
+        MenuBarInventoryItem(bundleIdentifier:"siblings",frame:frame(900)),
+        MenuBarInventoryItem(bundleIdentifier:"siblings",frame:frame(1000))
+    ],rendered:[MenuBarInventoryItem(bundleIdentifier:"input",frame:frame(1404)),
+                MenuBarInventoryItem(bundleIdentifier:"siblings",frame:frame(1200)),
+                MenuBarInventoryItem(bundleIdentifier:"siblings",frame:frame(1450))])
+    let resolved = MenuBarLayoutResolver.resolve(inventory:reconciled,separatorFrame:frame(1321),alwaysHiddenSeparatorFrame:nil,isLTR:true,excludingBundle:nil)
+    check(resolved.bundles(in:[.visible]).contains("input"),"The input source is classified by its rendered slot even when its own AX backing position is on the other side")
+    check(resolved.bundles(in:[.visible]).contains("siblings") && reconciled.filter { $0.bundleIdentifier == "siblings" }.count == 2,
+          "Physical sibling positions replace the publisher's stale coordinate map as a group")
+    check(resolved.bundles(in:[.hidden]).contains("overflow"),"An unrendered overflow publisher retains its existing section metadata")
+}
 let emptyEngine = NativeVisibilityEngine(items: emptyItems, inventory: emptyReader, visibility: emptyBridge,
     ownBundleIdentifier: "own", itemFrame: { _ in frame(600) }, isLTR: { true })
 var emptyResult: CollapseResult?
@@ -410,14 +519,316 @@ check(cancelledPocket == false && stalePocket.invalidated && engine.state == .ex
 engine.collapse { _ in }; reader.finish(); bridge.finish(.success(Handle()))
 engine.showPocketBundle("hidden") { _ in }; bridge.finish(.failure(NSError(domain: "PocketTest", code: 1)))
 check(engine.state == .expanded, "A failed temporary exposure releases restrictions and reports the actual expanded state")
+let pinSuite = "Draplet.PocketPlacement.\(UUID().uuidString)"
+let pinStore = UserDefaults(suiteName:pinSuite)!
+let compatibilityKey = "org.drapletqa.compatibility|slot:0/1"
+check(CompatibilityMenuPolicy.validated([compatibilityKey:1,"bad":1,"com.apple.MenuBarAgent|slot:0/1":1,"org.example|slot:0/1":99]) == [compatibilityKey:1], "Compatibility placements reject invalid identities and shared system controls")
+let compatibilityIdentifier = CompatibilityMenuPolicy.identifier(compatibilityKey)
+check(compatibilityIdentifier != CompatibilityMenuPolicy.identifier(compatibilityKey + "-other"), "Compatibility slots have separate stable native identities")
+let compatibilitySlot = CGRect(x:900,y:0,width:32,height:33)
+let compatibilityElement = AXUIElementCreateSystemWide()
+let compatibilityHost = PocketInventory.HostedItem(owner:42,element:compatibilityElement,frame:compatibilitySlot,identifier:compatibilityIdentifier)
+let compatibilityBindings = ["source":compatibilityIdentifier]
+check(CompatibilityMenuPolicy.frames(bindings:compatibilityBindings,host:.init(items:[compatibilityHost],overflow:nil),owner:42) == ["source":compatibilitySlot], "Only an actually rendered owned slot can replace the original frame")
+check(CompatibilityMenuPolicy.frames(bindings:compatibilityBindings,host:.init(items:[compatibilityHost],overflow:nil),owner:43).isEmpty, "An unrelated publisher cannot impersonate a compatibility slot")
+check(CompatibilityMenuPolicy.frames(bindings:compatibilityBindings,host:.init(items:[compatibilityHost],overflow:compatibilitySlot),owner:42).isEmpty, "A compatibility slot behind native overflow remains in Pocket")
+let paddedNeighbour = PocketInventory.HostedItem(owner:42,element:compatibilityElement,frame:CGRect(x:928.5,y:0,width:42,height:33),identifier:"Draplet.Toggle")
+check(CompatibilityMenuPolicy.frames(bindings:compatibilityBindings,host:.init(items:[compatibilityHost,paddedNeighbour],overflow:nil),owner:42) == ["source":compatibilitySlot], "Owned hit padding can overlap by 3.5pt without hiding a real compatibility glyph")
+let parkedNeighbour = PocketInventory.HostedItem(owner:42,element:compatibilityElement,frame:compatibilitySlot,identifier:"another-control")
+check(CompatibilityMenuPolicy.frames(bindings:compatibilityBindings,host:.init(items:[compatibilityHost,parkedNeighbour],overflow:nil),owner:42).isEmpty, "A parked compatibility slot over another control is never treated as rendered")
+let compatibilityPrefs = Preferences(store:pinStore)
+compatibilityPrefs.setCompatibilityItem(compatibilityKey,section:.hidden)
+check(Preferences(store:pinStore).compatibilityMenuItems[compatibilityKey] == MenuBarSection.hidden.rawValue, "Compatibility returns survive relaunch with their original source identity")
+compatibilityPrefs.setPocketPin("org.drapletqa.compatibility",pinned:true)
+check(compatibilityPrefs.compatibilityMenuItems.isEmpty, "Pinning removes that app's compatibility slots instead of leaving duplicates")
+pinStore.set(["fixture","fixture","","com.apple.controlcenter"],forKey:"pinnedPocketBundles")
+let pinPrefs = Preferences(store:pinStore)
+check(pinPrefs.pinnedPocketBundles == ["fixture"], "Saved Pocket pins deduplicate and exclude native system controls")
+pinPrefs.setPocketPin("second",pinned:true); pinPrefs.setPocketPin("second",pinned:true)
+check(Preferences(store:pinStore).pinnedPocketBundles == ["fixture","second"], "Pin order and application identities persist across restart without PID keys")
+pinPrefs.setPocketPin("fixture",pinned:false)
+check(Preferences(store:pinStore).pinnedPocketBundles == ["second"], "Returning an app removes only its explicit pin")
+pinPrefs.setPocketPin("com.apple.controlcenter",pinned:true)
+pinPrefs.setPocketPin("com.apple.TextInputMenuAgent",pinned:true)
+check(pinPrefs.pinnedPocketBundles == ["second"], "Shared system controls cannot be pinned through the preference API")
+pinPrefs.setPocketPin("com.apple.Spotlight",pinned:true)
+pinPrefs.setPocketPin("com.apple.campo",pinned:true)
+check(pinPrefs.pinnedPocketBundles == ["second","com.apple.Spotlight","com.apple.campo"],
+      "Individually hosted Spotlight items support the same pin path as other status extras")
+check(Preferences(store:pinStore).pinnedPocketBundles == pinPrefs.pinnedPocketBundles,
+      "Spotlight and Campo pins survive a fresh preferences instance")
+pinPrefs.setPocketPin("com.apple.Spotlight",pinned:false); pinPrefs.setPocketPin("com.apple.campo",pinned:false)
+check(pinPrefs.pinnedPocketBundles == ["second"], "Returning Spotlight preserves unrelated saved pins")
+pinStore.removePersistentDomain(forName:pinSuite)
+let pinItems = Items(), pinReader = Inventory(), pinBridge = Visibility()
+let pinEngine = NativeVisibilityEngine(items:pinItems,inventory:pinReader,visibility:pinBridge,ownBundleIdentifier:"own",itemFrame:{ _ in frame(600) },isLTR:{true})
+pinEngine.collapse { _ in }; pinReader.finish(); pinBridge.finish(.success(Handle()))
+let originalPinLayout = pinEngine.layout
+var pinOwners = ["visible":["visible","signed-visible"],"hidden":["hidden"],"always":["always"],"siblings":["siblings"]]
+// Display/backdrop reconfiguration can expand before a fresh placement read
+// answers. That expansion must not install a restriction with no section map.
+let resetItems = Items(), resetReader = Inventory(), resetBridge = Visibility()
+let resetEngine = NativeVisibilityEngine(items:resetItems,inventory:resetReader,visibility:resetBridge,ownBundleIdentifier:"own",itemFrame:{ _ in frame(600) },isLTR:{true})
+resetEngine.updatePocketPlacement(pinned:["visible"],owners:pinOwners)
+resetEngine.expand()
+resetReader.finish(); resetBridge.finish(.success(Handle()))
+check(resetEngine.layout != nil, "A pinned expansion keeps the fresh section read across display/backdrop reconfiguration")
+var resetResult: CollapseResult?
+resetEngine.collapse { resetResult = $0 }; resetBridge.finish(.success(Handle()))
+check(resetResult == .collapsed, "The original arrow still collapses after display/backdrop reconfiguration with saved pins")
+resetEngine.expand();resetBridge.finish(.success(Handle()));resetEngine.updatePocketPlacement(pinned:[],owners:[:])
+var failedPlacementReady = false, repeatedFailedPlacementReady = false
+resetEngine.invalidateLayout()
+resetEngine.updatePocketPlacement(pinned:["visible"],owners:pinOwners) { failedPlacementReady = true }
+resetEngine.expand();resetReader.finish([])
+check(failedPlacementReady && resetEngine.layout == nil && resetEngine.state == .expanded,
+      "A failed fresh section read fails open and completes pending pin-placement readers")
+resetEngine.updatePocketPlacement(pinned:["visible"],owners:pinOwners) { repeatedFailedPlacementReady = true }
+check(repeatedFailedPlacementReady, "An unchanged placement reader cannot remain trapped behind a failed section read")
+resetEngine.updatePocketPlacement(pinned:[],owners:[:])
+var placementReady = false, repeatedPlacementReady = false
+pinEngine.updatePocketPlacement(pinned:["visible"],owners:pinOwners) { placementReady = true }
+pinEngine.updatePocketPlacement(pinned:["visible"],owners:pinOwners) { repeatedPlacementReady = true }
+check(!placementReady && !repeatedPlacementReady,
+      "Both new and unchanged pin-policy readers wait for the same in-flight native activation")
+check(!pinBridge.allowed.contains("visible") && !pinBridge.allowed.contains("signed-visible") && pinBridge.allowed.contains("own"), "Pinning excludes both bundle and signing aliases while preserving Draplet")
+pinBridge.finish(.success(Handle()))
+check(placementReady && repeatedPlacementReady,
+      "Native acceptance releases both pin-policy readers before they sample the rebuilt overflow slot")
+pinEngine.expand()
+check(pinBridge.allowed.contains("hidden") && !pinBridge.allowed.contains("visible"), "The original accordion reveals other icons while pinned apps stay in Pocket")
+pinBridge.finish(.success(Handle()))
+pinOwners["new-app"] = ["new-app"]
+pinEngine.updatePocketPlacement(pinned:["visible"],owners:pinOwners)
+check(pinBridge.allowed.contains("new-app") && pinEngine.layout == originalPinLayout, "New unpinned apps are shown without reclassifying a restricted native layout")
+pinBridge.finish(.success(Handle()))
+var pinCaptureShown = false
+pinEngine.stagePocketCapture(["visible","signed-visible"]) { pinCaptureShown = $0 }
+check(pinBridge.allowed.contains("visible") && pinBridge.allowed.contains("signed-visible"), "Image capture may temporarily expose the pinned app itself")
+let captureOnlyRestriction = Handle(); pinBridge.finish(.success(captureOnlyRestriction))
+check(pinCaptureShown, "Pinned exposure completion is delivered")
+check(pinEngine.stageUnrestrictedPocketCapture() && captureOnlyRestriction.invalidated && pinEngine.layout == originalPinLayout,
+      "A bounded unrestricted capture fallback drops only its temporary assertion and preserves the original native sections")
+pinEngine.finishPocketCapture()
+check(!pinBridge.allowed.contains("visible") && pinBridge.allowed.contains("new-app"), "Capture cleanup restores pins and the current unpinned owners")
+let pinnedRestriction = Handle(); pinBridge.finish(.success(pinnedRestriction))
+pinEngine.updatePocketPlacement(pinned:[],owners:pinOwners)
+check(pinnedRestriction.invalidated && pinEngine.layout == originalPinLayout, "Unpin or presentation suspension releases the added restriction without changing native sections")
+// A placement changed during an in-flight collapse must take effect before
+// the collapse reports success, not wait indefinitely for another preference edit.
+pinEngine.collapse { _ in }; pinReader.finish()
+pinEngine.updatePocketPlacement(pinned:["visible"],owners:pinOwners)
+let obsoletePlacement = Handle(); pinBridge.finish(.success(obsoletePlacement))
+check(obsoletePlacement.invalidated && !pinBridge.allowed.contains("visible"), "An obsolete in-flight allow-list is discarded and retried with the new pin")
+pinBridge.finish(.success(Handle()))
+check(pinEngine.state == .collapsed, "The retried collapse completes with the new placement")
+pinEngine.updatePocketPlacement(pinned:[],owners:[:]); pinEngine.expand()
+var sessionReads = 0
+var activeSession = true
+let sessionVisibility = SessionVisibilityCache(read: { sessionReads += 1; return activeSession })
+check(sessionVisibility.isActive(at: 100), "An unlocked console session permits overlays")
+activeSession = false
+check(sessionVisibility.isActive(at: 100.1) && sessionReads == 1, "Presentation ticks reuse session metadata without repeated IPC")
+check(!sessionVisibility.isActive(at: 100.25), "Locking or leaving the console suppresses overlays and Pocket capture")
+activeSession = true
+check(sessionVisibility.isActive(at: 100.5), "Unlocking restores presentation eligibility")
+let dragSource = CGRect(x: 1000,y: 0,width: 30,height: 33)
+let dragTarget = CGRect(x: 900,y: 40,width: 180,height: 100)
+let dragStart = CGPoint(x:1015,y:16), dragDrop = CGPoint(x:950,y:80)
+var dragPolicy = PocketDragDropPolicy()
+dragPolicy.begin(at:dragStart,command:false,source:dragSource)
+dragPolicy.moved(to:dragDrop)
+check(dragPolicy.end(at:dragDrop,target:dragTarget) == nil, "Ordinary clicks and file drags never redirect native mouse-up")
+dragPolicy.begin(at:CGPoint(x:700,y:16),command:true,source:dragSource)
+dragPolicy.moved(to:dragDrop)
+check(dragPolicy.end(at:dragDrop,target:dragTarget) == nil, "Command-drags starting outside the exact test source remain untouched")
+dragPolicy.begin(at:dragStart,command:true,source:dragSource)
+check(dragPolicy.end(at:dragDrop,target:dragTarget) == nil, "A mouse-up without a confirmed drag cannot become a Pocket drop")
+dragPolicy.begin(at:dragStart,command:true,source:dragSource)
+check(!dragPolicy.moved(to:CGPoint(x:1017,y:17)), "Minor pointer jitter does not arm drop interception")
+dragPolicy.cancel()
+dragPolicy.begin(at:dragStart,command:true,source:dragSource)
+check(dragPolicy.moved(to:dragDrop) && dragPolicy.end(at:dragDrop,target:dragTarget) == dragStart, "Only a confirmed target drop returns the original native completion point")
+check(dragPolicy.end(at:dragDrop,target:dragTarget) == nil, "A completed drop cannot intercept another mouse-up")
+dragPolicy.begin(at:dragStart,command:true,source:dragSource); dragPolicy.moved(to:dragDrop)
+check(dragPolicy.end(at:CGPoint(x:300,y:500),target:dragTarget) == nil, "Dropping outside Pocket preserves the native drag outcome")
+dragPolicy.begin(at:dragStart,command:true,source:dragSource); dragPolicy.moved(to:dragDrop); dragPolicy.cancel()
+check(dragPolicy.end(at:dragDrop,target:dragTarget) == nil, "Escape or a disabled event tap cancels interception immediately")
+dragPolicy.begin(at:dragStart,command:true,source:dragSource); dragPolicy.moved(to:dragDrop)
+check(dragPolicy.end(at:dragDrop,target:nil) == nil, "A closed or absent target cannot accept a stale drop")
+dragPolicy.begin(at:dragStart,command:true,source:dragSource); dragPolicy.moved(to:dragDrop)
+check(dragPolicy.end(at:dragDrop,target:CGRect(x:200,y:200,width:100,height:100)) == nil, "Drop membership uses the current target position")
+dragPolicy.begin(at:dragStart,command:true,source:nil); dragPolicy.moved(to:dragDrop)
+check(dragPolicy.end(at:dragDrop,target:dragTarget) == nil, "Unknown source geometry fails open without changing input")
+dragPolicy.begin(at:dragStart,command:true,source:dragSource); dragPolicy.moved(to:dragDrop)
+check(dragPolicy.end(at:CGPoint(x:CGFloat.nan,y:80),target:dragTarget) == nil, "Nonfinite event coordinates never route a native drop")
+var rightHide = RightAutoHidePolicy()
+check(!rightHide.shouldHide(now: 100, held: true, delay: 5) && !rightHide.shouldHide(now: 120, held: true, delay: 5),
+      "Hovering the expanded bar or Pocket holds reveal indefinitely")
+check(!rightHide.shouldHide(now: 121, held: false, delay: 5) && !rightHide.shouldHide(now: 125.99, held: false, delay: 5) && rightHide.shouldHide(now: 126, held: false, delay: 5),
+      "Auto-hide waits five full seconds after departing the combined hover region")
+check(!rightHide.shouldHide(now: 127, held: true, delay: 5) && !rightHide.shouldHide(now: 130, held: false, delay: 5) && !rightHide.shouldHide(now: 134.9, held: false, delay: 5),
+      "Re-entering either region resets the entire departure delay")
 let pocketDisplay = CGRect(x: 0, y: 0, width: 1470, height: 956)
+check(PocketReturnDropPolicy.matches("own-token",expected:"own-token") && !PocketReturnDropPolicy.matches("foreign",expected:"own-token") && !PocketReturnDropPolicy.matches(nil,expected:"own-token"),
+      "Only the active Pocket return drag token is accepted; unrelated files and drag payloads fail closed")
+check(PocketReturnDropPolicy.canBegin(pinned:true,commandAtMouseDown:true,commandNow:true)
+      && !PocketReturnDropPolicy.canBegin(pinned:true,commandAtMouseDown:false,commandNow:true)
+      && !PocketReturnDropPolicy.canBegin(pinned:true,commandAtMouseDown:true,commandNow:false)
+      && !PocketReturnDropPolicy.canBegin(pinned:false,commandAtMouseDown:true,commandNow:true),
+      "Pocket return drags require a pinned icon and Command held from mouse-down through the drag threshold")
+check(PocketReturnDropPolicy.shouldReturn(accepted:true,moved:true,active:true,command:true) && !PocketReturnDropPolicy.shouldReturn(accepted:false,moved:true,active:true,command:true),
+      "A return requires a successful drop on Draplet’s native menu-bar destination")
+check(!PocketReturnDropPolicy.shouldReturn(accepted:true,moved:false,active:true,command:true) && !PocketReturnDropPolicy.shouldReturn(accepted:true,moved:true,active:false,command:true),
+      "Escape, outside drops and stale or suppressed drag sessions never remove a pin")
+check(!PocketReturnDropPolicy.shouldReturn(accepted:true,moved:true,active:true,command:false),
+      "Releasing Command before a successful return drop leaves the pin intact")
+func popup(_ pid:pid_t,_ number:Int,_ size:CGFloat = 100) -> WindowServerSnapshot.Window {
+    WindowServerSnapshot.Window([kCGWindowOwnerPID:pid,kCGWindowNumber:number,kCGWindowLayer:101,
+        kCGWindowBounds:CGRect(x:900,y:33,width:size,height:size).dictionaryRepresentation,kCGWindowIsOnscreen:true] as NSDictionary)!
+}
+check(!NativeMenuTrackingPolicy.isTracking([popup(10,20),popup(11,21,2)],ownPID:10,pocketWindow:nil),
+      "Draplet popover shadows and tiny helper windows do not hold the right bar open forever")
+check(NativeMenuTrackingPolicy.isTracking([popup(11,22)],ownPID:10,pocketWindow:nil),
+      "A real third-party native menu retains the full right-side interaction")
 let notchRight = CGRect(x: 824, y: 0, width: 646, height: 80)
+let nativeOverflowSlot = CGRect(x:830,y:0,width:20,height:33)
+let revealedSlots = [CGRect(x:1000,y:0,width:34,height:33),CGRect(x:1200,y:0,width:42,height:33)]
+check(PocketGeometry.overflowButtonFrame(expanded:false,native:nativeOverflowSlot,slots:revealedSlots,area:notchRight,height:33) == nil,
+      "The Pocket chevron stays hidden when the right strip is collapsed, even with native overflow")
+check(PocketGeometry.overflowButtonFrame(expanded:false,native:nil,slots:revealedSlots,area:notchRight,height:33) == nil,
+      "Pinned apps never create a permanent second button beside the collapsed accordion")
+let leadingPocket = PocketGeometry.overflowButtonFrame(expanded:true,native:nil,slots:revealedSlots,area:notchRight,height:33)
+check(leadingPocket == CGRect(x:974,y:0,width:26,height:33),
+      "Without native overflow, the Pocket chevron sits before every revealed icon rather than beside the main arrow")
+check(PocketGeometry.overflowButtonFrame(expanded:true,native:nativeOverflowSlot,slots:revealedSlots,area:notchRight,height:33) == CGRect(x:824,y:0,width:26,height:33),
+      "The leading Pocket chevron covers the system double-arrow ink within the notch's usable area")
+check(PocketGeometry.overflowButtonFrame(expanded:true,native:nil,slots:[CGRect(x:835,y:0,width:34,height:33)],area:notchRight,height:33) == nil,
+      "A Pocket button without enough leading room never covers an existing status icon or the notch")
+check(PocketGeometry.overflowButtonFrame(expanded:true,native:nil,slots:[],area:notchRight,height:33) == nil,
+      "Unresolved native geometry never guesses a Pocket button position")
 check(!PocketGeometry.isUsable(CGRect(x: 710, y: 0, width: 26, height: 33), on: pocketDisplay, rightArea: notchRight),
       "A coordinate under the notch never receives a pocket click")
+let disclosureMask = RightMenuCover()
+disclosureMask.prepare(frame:CGRect(x:-4000,y:0,width:373,height:33),progress:0,style:.curtain)
+let maskedDisclosure = PocketOverflowButton(canPresent:{true})
+maskedDisclosure.show(at:CGRect(x:-3800,y:0,width:26,height:33),beneath:disclosureMask.maskingWindow)
+check(NSApp.windows.first { $0.windowNumber == maskedDisclosure.windowNumber }!.level == disclosureMask.maskingWindow!.level, "The Pocket control stays below the shared curtain while revealing")
+check(maskedDisclosure.parentWindowNumber == disclosureMask.windowNumber,
+      "The actual disclosure belongs to the curtain's ordered window group during native layout preparation")
+disclosureMask.dismiss()
+maskedDisclosure.finishReveal()
+let disclosureWindow = NSApp.windows.first { $0.windowNumber == maskedDisclosure.windowNumber }!
+check(disclosureWindow.level.rawValue > 26, "The unmasked Pocket control owns clicks above transparent third-party status windows")
+check(maskedDisclosure.isVisible && maskedDisclosure.parentWindowNumber == nil,
+      "Completing the reveal leaves its existing disclosure visible without a hide/show handoff")
+disclosureMask.prepare(frame:CGRect(x:-4000,y:0,width:373,height:33),progress:0,style:.curtain)
+maskedDisclosure.show(at:CGRect(x:-3800,y:0,width:26,height:33),beneath:disclosureMask.maskingWindow)
+maskedDisclosure.hide()
+disclosureMask.prepare(frame:CGRect(x:-4000,y:0,width:373,height:33),progress:0,style:.curtain)
+check(!maskedDisclosure.isVisible && maskedDisclosure.parentWindowNumber == nil,
+      "A hidden disclosure detaches so another curtain transition cannot resurrect it")
+maskedDisclosure.stop();disclosureMask.stop()
+let occupiedMask = RightMenuCover.View(frame:CGRect(x:0,y:0,width:373,height:33))
+occupiedMask.progress = 0.35;occupiedMask.revealExtent = 208
+let occupiedBitmap = NSBitmapImageRep(bitmapDataPlanes:nil,pixelsWide:373,pixelsHigh:33,bitsPerSample:8,samplesPerPixel:4,hasAlpha:true,isPlanar:false,colorSpaceName:.deviceRGB,bytesPerRow:0,bitsPerPixel:0)!
+NSGraphicsContext.saveGraphicsState();NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep:occupiedBitmap)
+occupiedMask.draw(occupiedMask.bounds);NSGraphicsContext.restoreGraphicsState()
+check(occupiedBitmap.colorAt(x:248,y:16)!.alphaComponent > 0.95 && occupiedBitmap.colorAt(x:350,y:16)!.alphaComponent < 0.05,
+      "The right mask animates through occupied icons instead of spending the reveal on empty notch-side space")
 check(!PocketGeometry.isUsable(CGRect(x: -20, y: 0, width: 26, height: 33), on: pocketDisplay, rightArea: nil),
       "Offscreen legacy items fail open instead of clicking an unrelated app")
 check(PocketGeometry.isUsable(CGRect(x: 1200, y: 0, width: 26, height: 33), on: pocketDisplay, rightArea: notchRight),
       "A fully visible right-side icon is safe to capture and activate")
+let ownerProxy = AXUIElementCreateApplication(777)
+let hostProxy = AXUIElementCreateSystemWide()
+let ownerFrame = CGRect(x:1000,y:4,width:24,height:24)
+let dragHost = PocketInventory.HostedItem(owner:777,element:hostProxy,frame:ownerFrame)
+let dragPoint = CGPoint(x:1012,y:16)
+check(PocketInventory.hostedDragCandidate(at:dragPoint,host:.init(items:[dragHost],overflow:nil),area:notchRight)?.owner == 777,
+      "A broker-hosted status drag resolves through its sole fully visible slot when the global hit test returns a generic menu bar")
+check(PocketInventory.hostedDragCandidate(at:dragPoint,host:.init(items:[dragHost,dragHost],overflow:nil),area:notchRight) == nil,
+      "Overlapping broker slots never guess which status item is being dragged")
+check(PocketInventory.hostedDragCandidate(at:dragPoint,host:.init(items:[dragHost],overflow:ownerFrame),area:notchRight) == nil,
+      "The system overflow control cannot become an application pin drag")
+check(PocketInventory.hostedDragCandidate(at:CGPoint(x:1002,y:16),host:.init(items:[dragHost],overflow:CGRect(x:1020,y:0,width:20,height:33)),area:notchRight) == nil,
+      "A partly covered native slot cannot start a Pocket drag outside its overlapping overflow button")
+check(PocketInventory.hostedDragCandidate(at:CGPoint(x:900,y:100),host:.init(items:[dragHost],overflow:nil),area:notchRight) == nil,
+      "A drag outside the physical menu bar never uses hosted status identity")
+check(PocketInventory.hostedDragCandidate(at:dragPoint,host:.init(items:[dragHost],overflow:nil),area:CGRect(x:1010,y:0,width:460,height:80)) == nil,
+      "A slot clipped by the notch or display edge is not a safe drag source")
+let ownerItem = PocketItem(id:"777:0",bundle:"fixture",pid:777,name:"one",element:ownerProxy,frame:ownerFrame,windowID:nil)
+let peerItem = PocketItem(id:"777:1",bundle:"fixture",pid:777,name:"two",element:AXUIElementCreateApplication(778),frame:CGRect(x:1050,y:4,width:24,height:24),windowID:nil)
+let hostFixture = PocketInventory.HostSnapshot(items:[PocketInventory.HostedItem(owner:777,element:hostProxy,frame:ownerFrame),PocketInventory.HostedItem(owner:777,element:hostProxy,frame:peerItem.frame)],overflow:nil)
+let parkedHost = PocketInventory.HostSnapshot(items:[],overflow:nil)
+check(PocketInventory.preferredHostSnapshot([parkedHost,hostFixture])?.items.count == 2,
+      "A parked duplicate MenuBarAgent window with identical bounds cannot hide the rendered physical status slots")
+check(PocketInventory.preferredHostSnapshot([hostFixture,parkedHost])?.items.count == 2,
+      "Reversing duplicate host-window order preserves the physical glyph catalog")
+check(PocketInventory.preferredHostSnapshot([parkedHost]) == nil,
+      "An entirely parked host catalog is unavailable, never evidence that all status space is empty")
+check(PocketInventory.preferredHostSnapshot([.init(items:[],overflow:ownerFrame)])?.overflow == ownerFrame,
+      "A real native overflow control remains reachable when all foreign status slots are parked")
+check(PocketInventory.matchFrame(ownerItem,among:[ownerItem,peerItem],host:hostFixture) == ownerFrame,
+      "Different publisher and host AX wrappers join through unique owner geometry")
+let ambiguousItem = PocketItem(id:"777:2",bundle:"fixture",pid:777,name:"ambiguous",element:AXUIElementCreateApplication(779),frame:ownerFrame,windowID:nil)
+check(PocketInventory.matchFrame(ownerItem,among:[ownerItem,ambiguousItem],host:hostFixture) == nil,
+      "Ambiguous same-owner geometry cannot capture a neighboring icon")
+let movedSingle = PocketInventory.HostSnapshot(items:[PocketInventory.HostedItem(owner:777,element:hostProxy,frame:peerItem.frame)],overflow:nil)
+check(PocketInventory.matchFrame(ownerItem,among:[ownerItem],host:movedSingle) == peerItem.frame,
+      "A single real item follows its sole host entry even when its publisher frame is stale")
+let parkedSlot = CGRect(x:857.5,y:0,width:50,height:33)
+let parkedButtons = PocketInventory.HostSnapshot(items:[
+    .init(owner:777,element:ownerProxy,frame:parkedSlot,name:"one"),
+    .init(owner:777,element:hostProxy,frame:parkedSlot,name:"two")
+],overflow:CGRect(x:890.5,y:1,width:17.5,height:30))
+check(PocketInventory.matchFrame(ownerItem,among:[ownerItem,peerItem],host:.init(items:parkedButtons.renderedItems,overflow:parkedButtons.overflow)) == nil,
+      "The real parked AXButton pattern cannot classify hidden siblings as drawn or photograph the overflow arrow")
+let overlappingButtons = PocketInventory.HostSnapshot(items:parkedButtons.items,overflow:nil)
+check(PocketInventory.matchFrame(ownerItem,among:[ownerItem,peerItem],host:.init(items:overlappingButtons.renderedItems,overflow:nil)) == nil,
+      "Identical parked physical rectangles remain unavailable even when the overflow attribute is transiently absent")
+let stagedIdentityHost = PocketInventory.HostSnapshot(items:[
+    .init(owner:777,element:ownerProxy,frame:ownerFrame),
+    .init(owner:778,element:hostProxy,frame:ownerFrame)
+],overflow:nil)
+check(PocketInventory.matchFrame(ownerItem,among:[ownerItem],host:stagedIdentityHost) == ownerFrame,
+      "A capture-staged owner's exact identity survives unrelated parked rectangles without weakening visible-layout classification")
+var hostSettlement = PocketHostSettlement()
+var pinnedSettlement = PocketHostSettlement()
+check(!pinnedSettlement.accepts(hostFixture,at:0,awaitingAbsenceOf:[777])
+      && !pinnedSettlement.accepts(hostFixture,at:0.5,awaitingAbsenceOf:[777]),
+      "Stable ghost AXButtons from pinned owners cannot establish a visible strip's leading edge")
+check(!pinnedSettlement.accepts(.init(items:[],overflow:nil),at:0.6,awaitingAbsenceOf:[777])
+      && pinnedSettlement.accepts(.init(items:[],overflow:nil),at:0.73,awaitingAbsenceOf:[777]),
+      "The host must settle again after the pinned owner finally disappears")
+check(!pinnedSettlement.accepts(hostFixture,at:0.8,awaitingAbsenceOf:[777])
+      && !pinnedSettlement.accepts(.init(items:[],overflow:nil),at:0.9,awaitingAbsenceOf:[777]),
+      "A late pinned-owner ghost resets the quiet interval instead of retaining a stale accepted layout")
+check(!hostSettlement.accepts(parkedButtons,at:0) && !hostSettlement.accepts(parkedButtons,at:0.10),
+      "A single pre-reflow host read never unveils the overflow disclosure")
+let reflowedHost = PocketInventory.HostSnapshot(items:hostFixture.items,overflow:CGRect(x:890.5,y:1,width:17.5,height:30))
+check(!hostSettlement.accepts(reflowedHost,at:0.11) && !hostSettlement.accepts(reflowedHost,at:0.20),
+      "Moving native geometry restarts the quiet interval instead of publishing the previous overflow location")
+check(hostSettlement.accepts(.init(items:Array(reflowedHost.items.reversed()),overflow:reflowedHost.overflow),at:0.24),
+      "Stable physical slots settle even when MenuBarAgent reorders its AX children")
+check(!hostSettlement.accepts(nil,at:0.25) && hostSettlement.accepts(nil,at:0.38),
+      "An unreadable host is bounded and never reuses a stale physical overflow location")
+let overflowArea = CGRect(x:824,y:0,width:646,height:80)
+let fittedFrame = CGRect(x:1000,y:4,width:24,height:24)
+check(PocketOverflowMembership.resolve([("a",24)],drawn:["a":fittedFrame],display:pocketDisplay,area:overflowArea,capacity:300,nativeOverflow:false,revealed:true).isEmpty,
+      "A fitting bar has no overflow pocket")
+check(PocketOverflowMembership.resolve([("a",24)],drawn:[:],display:pocketDisplay,area:overflowArea,capacity:300,nativeOverflow:false,revealed:true) == ["a"],
+      "An eligible unrendered icon stays reachable in Pocket even when proxy widths fit and the native overflow button is absent")
+check(PocketOverflowMembership.resolve([("shown",34),("missing",24)],drawn:["shown":fittedFrame],display:pocketDisplay,area:overflowArea,capacity:372.5,nativeOverflow:false,revealed:true) == ["missing"],
+      "A partially populated expanded host cannot silently lose an unpinned publisher after QA pressure is removed")
+check(PocketOverflowMembership.resolve([("a",24)],drawn:[:],display:pocketDisplay,area:overflowArea,capacity:10,nativeOverflow:true,revealed:false).isEmpty,
+      "Intentionally collapsed items never become overflow membership")
+check(PocketOverflowMembership.resolve([("a",24),("b",24)],drawn:[:],display:pocketDisplay,area:overflowArea,capacity:10,nativeOverflow:true,revealed:true,hostAvailable:false).isEmpty,
+      "A transient missing host snapshot cannot classify every running status item as overflow")
+check(PocketOverflowMembership.resolve([("same:1",24),("same:2",24)],drawn:["same:1":fittedFrame],display:pocketDisplay,area:overflowArea,capacity:30,nativeOverflow:true,revealed:true) == ["same:2"],
+      "Only the nonfitting sibling enters Pocket, never every item from its app")
+check(PocketOverflowMembership.resolve([("a",24),("b",24)],drawn:["a":fittedFrame,"b":CGRect(x:790,y:4,width:42,height:24)],display:pocketDisplay,area:overflowArea,capacity:30,nativeOverflow:true,revealed:true) == ["b"],
+      "An item crossing the notch boundary overflows while its fitting neighbor stays in the bar")
 let placedPocket = PocketGeometry.panelFrame(anchor: CGRect(x: -3, y: 930, width: 20, height: 26), size: CGSize(width: 286, height: 380), screen: pocketDisplay, menuHeight: 33)
 check(placedPocket.minX == 8 && placedPocket.maxY < 923 && pocketDisplay.contains(placedPocket),
       "Pocket stays below the bar and clamps to the screen edge")
@@ -453,11 +864,86 @@ var transparentPocket = pocketPixels
 for i in [0,4,8,20,24,28,32] { for c in 0..<4 { transparentPocket[i+c] = 0 } }
 check(PocketImage.isolate(pocketPixelImage(transparentPocket)) != nil,
       "Already transparent Ice window captures retain their original silhouette")
+func pocketRimFixture(background: UInt8, noise: Bool, color: [UInt8]? = nil) -> CGImage {
+    let width = 100, height = 66
+    var bytes = [UInt8](repeating:0,count:width*height*4)
+    for y in 0..<height { for x in 0..<width {
+        let glyph = (35..<65).contains(x) && (19..<47).contains(y)
+        let rim = noise && x == 96 && (10..<56).contains(y)
+        let value: UInt8 = glyph ? (background < 128 ? 255 : 0) : rim ? (background < 128 ? 0 : 255) : background
+        let offset = (y*width+x)*4
+        for c in 0..<3 { bytes[offset+c] = glyph ? (color?[c] ?? value) : value }
+        bytes[offset+3] = 255
+    } }
+    return CGImage(width:width,height:height,bitsPerComponent:8,bitsPerPixel:32,bytesPerRow:width*4,
+        space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGBitmapInfo(rawValue:CGImageAlphaInfo.premultipliedLast.rawValue),
+        provider:CGDataProvider(data:Data(bytes) as CFData)!,decode:nil,shouldInterpolate:false,intent:.defaultIntent)!
+}
+for background: UInt8 in [1,254] {
+    let clean = PocketImage.trim(PocketImage.isolate(pocketRimFixture(background:background,noise:false))!)!
+    let noisy = PocketImage.trim(PocketImage.isolate(pocketRimFixture(background:background,noise:true))!)!
+    check(noisy.width == clean.width && noisy.height == clean.height,
+          "One-level native background noise cannot become opaque ink or widen a captured status glyph")
+    check(PocketImage.isMonochrome(clean),
+          "A cropped native glyph remains a template even when its provider omits the last row's trailing stride padding")
+}
+// Native images survive both soft expiry and failed/restarted captures.
+let availabilityInner = try! PropertyListSerialization.data(fromPropertyList:[
+    ["location":["bundle":["_0":"blocked"]],"isAllowed":false],
+    ["location":["bundle":["_0":"active"]],"isAllowed":true],
+    ["bundle":["_0":"marker-only"]]
+],format:.binary,options:0)
+let availabilityPlist = try! PropertyListSerialization.data(fromPropertyList:["trackedApplications":availabilityInner],format:.binary,options:0)
+check(MenuBarAvailability.disallowed(in:availabilityPlist) == ["blocked"], "Only explicit macOS denial excludes an unpublished status item; saved pins are independent")
+check(MenuBarAvailability.disallowed(in:Data()) == [], "Unavailable or changed Control Center metadata cannot hide unrelated native icons")
+let repeatedImageKeys = PocketInventory.imageCacheKeys(bundle:"fixture",identifiers:["same","same"])
+check(Set(repeatedImageKeys).count == 2, "Repeated AX identifiers cannot alias different native glyphs in the persistent cache")
+check(PocketInventory.imageCacheKeys(bundle:"fixture",identifiers:["first","second"]).reversed().map { $0 }
+      == PocketInventory.imageCacheKeys(bundle:"fixture",identifiers:["second","first"]), "Unique AX identities survive sibling reordering")
+let glyphCacheURL = FileManager.default.temporaryDirectory.appendingPathComponent("DrapletGlyphCache-"+UUID().uuidString)
+let glyphCache = PocketImageCache(directory:glyphCacheURL)
+let glyphDate = Date(timeIntervalSince1970:1000)
+let glyphKey = "fixture|slot:0/1"
+let glyphImage = NSImage(cgImage:pocketPixelImage(transparentPocket),size:NSSize(width:2,height:2))
+glyphImage.isTemplate = true
+glyphCache.succeeded(glyphImage,key:glyphKey,pid:777,scale:2,now:glyphDate)
+check(!glyphCache.needsRefresh(glyphKey,pid:777,scale:2,now:glyphDate.addingTimeInterval(1)), "Fresh native glyphs need no repeat screenshot")
+check(glyphCache.needsRefresh(glyphKey,pid:777,scale:2,now:glyphDate.addingTimeInterval(121)) && glyphCache.image(glyphKey) != nil,
+      "Soft image expiry requests background work without removing last-good pixels")
+glyphCache.failed(glyphKey,pid:777,now:glyphDate.addingTimeInterval(122))
+check(glyphCache.image(glyphKey) != nil && !glyphCache.unavailable(glyphKey), "A failed refresh preserves the actual native glyph instead of showing an error cell")
+check(!glyphCache.needsRefresh(glyphKey,pid:777,scale:2,now:glyphDate.addingTimeInterval(123)), "Failed background captures back off instead of running on every open")
+glyphCache.flush()
+let relaunchedGlyphCache = PocketImageCache(directory:glyphCacheURL)
+check(relaunchedGlyphCache.image(glyphKey)?.isTemplate == true && relaunchedGlyphCache.image(glyphKey)?.size == glyphImage.size,
+      "A fresh process restores native glyph pixels, logical size and template tint from disk")
+check(relaunchedGlyphCache.needsRefresh(glyphKey,pid:778,scale:2,now:glyphDate.addingTimeInterval(123)) && relaunchedGlyphCache.image(glyphKey) != nil,
+      "A restarted publisher refreshes in the background while its last-good glyph remains available")
+relaunchedGlyphCache.appearanceChanged()
+check(relaunchedGlyphCache.image(glyphKey) != nil, "Display changes retain the previous image until a replacement succeeds")
+let missingGlyph = "fixture|slot:1/2"
+relaunchedGlyphCache.failed(missingGlyph,pid:777,now:glyphDate)
+check(relaunchedGlyphCache.unavailable(missingGlyph) && !relaunchedGlyphCache.needsRefresh(missingGlyph,pid:777,scale:2,now:glyphDate.addingTimeInterval(10)),
+      "An unpublished native icon is temporarily dormant rather than repeatedly recaptured")
+let idleMissing = "fixture|slot:idle"
+relaunchedGlyphCache.failed(idleMissing,pid:777,now:glyphDate,background:true)
+check(!relaunchedGlyphCache.unavailable(idleMissing) && relaunchedGlyphCache.needsRefresh(idleMissing,pid:777,scale:2,now:glyphDate.addingTimeInterval(1),foreground:true),
+      "An idle capture miss still permits the safe foreground fallback on first use")
+relaunchedGlyphCache.requestRefresh([missingGlyph])
+check(relaunchedGlyphCache.needsRefresh(missingGlyph,pid:777,scale:2,now:glyphDate.addingTimeInterval(10)), "Explicit refresh bypasses the retry backoff")
+relaunchedGlyphCache.flush()
+try? FileManager.default.removeItem(at:glyphCacheURL)
+let coloredPocketCrop = PocketImage.trim(PocketImage.isolate(pocketRimFixture(background:1,noise:false,color:[255,80,40]))!)!
+check(!PocketImage.isMonochrome(coloredPocketCrop),
+      "A real colored cropped status icon keeps its artwork instead of becoming a template")
 invalidPrefs.rightRevealMode = .pocket
-check(!invalidPrefs.requiresSetup && invalidPrefs.needsIconCapture && !invalidPrefs.needsBackground,
-      "Pocket can use app artwork without forcing screen-capture permission in right-only Hidden Bar mode")
+check(invalidPrefs.requiresSetup && invalidPrefs.needsIconCapture && invalidPrefs.needsBackground,
+      "Real overflow imagery and its native-bar button require capture permission; no app artwork masks a missing grant")
 let pocketSource = CGEventSource(stateID: .privateState)!
 let pocketEvent = PocketItemEvents.event(type: .rightMouseUp, point: CGPoint(x: 1200, y: 16), windowID: 77, pid: 55, button: .right, source: pocketSource)!
+let placementRelease = PocketItemEvents.placementEvent(.leftMouseUp,point:CGPoint(x:1200,y:16),source:pocketSource)!
+check(placementRelease.flags.contains(.maskCommand) && placementRelease.getIntegerValueField(.eventSourceUserData) == PocketItemEvents.placementEventTag,
+      "A native placement releases the mouse while Command is still held, and retains its synthetic-placement identity")
 check(pocketEvent.type == .rightMouseUp && pocketEvent.flags.isEmpty && pocketEvent.getIntegerValueField(.eventTargetUnixProcessID) == 55 && pocketEvent.getIntegerValueField(.mouseEventWindowUnderMousePointer) == 77,
       "Ice-derived native clicks retain the target window and never inherit Command-drag flags")
 check(!PocketActionPolicy.shouldUseMouse(after: .cannotComplete) && !PocketActionPolicy.shouldUseMouse(after: .success),
@@ -472,9 +958,9 @@ let suite = "Draplet.Tests.\(UUID().uuidString)"
 let store = UserDefaults(suiteName: suite)!
 defer { store.removePersistentDomain(forName: suite) }
 let prefs = Preferences(store: store)
-check(prefs.rightRevealMode == .menuBar, "Existing users keep the original menu-bar reveal until Pocket is selected")
+check(prefs.rightRevealMode == .pocket, "Overflow assistance is enabled by default independently of the native arrow")
 prefs.rightRevealMode = .pocket
-check(Preferences(store: store).rightRevealMode == .pocket, "Pocket selection survives restart")
+check(Preferences(store: store).rightRevealMode == .pocket, "Overflow assistance preference survives restart")
 check(prefs.backgroundMode == .cached, "Static backgrounds use a one-shot cache by default")
 prefs.backgroundMode = .live
 check(Preferences(store: store).backgroundMode == .live, "Animated-wallpaper mode survives a restart")
@@ -528,6 +1014,65 @@ prefs.leftTrigger = .hover
 check(prefs.trigger(for: .left) == .hover && prefs.trigger(for: .right) == .click, "Independent reveal triggers")
 prefs.linkTriggers(true)
 check(prefs.trigger(for: .right) == .hover, "Relinking retains left reveal choice")
+
+// Drive the actual AppKit control with process-local events. The test subclass
+// stops at the native session boundary; no global pointer input is synthesized.
+final class PocketDragControlFixture: PocketClickTarget.Target {
+    var starts = 0
+    override func startDrag(token:String,event:NSEvent) { starts += 1 }
+}
+let dragControlWindow = NSWindow(contentRect:NSRect(x:-3500,y:0,width:100,height:80),styleMask:[.borderless],backing:.buffered,defer:false)
+let dragControl = PocketDragControlFixture(frame:NSRect(x:20,y:20,width:34,height:34))
+dragControlWindow.contentView!.addSubview(dragControl)
+var dragAdmissions = 0, dragClicks = 0, localReleases = 0
+var localCommandAtRelease = false
+dragControl.endDrag = { _,command in localReleases += 1;localCommandAtRelease = command }
+dragControl.beginDrag = { _ in dragAdmissions += 1;return true };dragControl.activate = { _ in dragClicks += 1 }
+func pocketMouse(_ type:NSEvent.EventType,_ x:CGFloat,_ command:Bool) -> NSEvent {
+    NSEvent.mouseEvent(with:type,location:NSPoint(x:x,y:30),modifierFlags:command ? .command : [],timestamp:1,windowNumber:dragControlWindow.windowNumber,context:nil,eventNumber:1,clickCount:1,pressure:1)!
+}
+dragControl.pinned = true
+dragControl.mouseDown(with:pocketMouse(.leftMouseDown,30,true));dragControl.mouseDragged(with:pocketMouse(.leftMouseDragged,32,true))
+check(dragControl.starts == 0, "Command-click jitter does not start a Pocket drag")
+dragControl.mouseDragged(with:pocketMouse(.leftMouseDragged,38,true));dragControl.mouseUp(with:pocketMouse(.leftMouseUp,38,true))
+check(dragControl.starts == 1 && dragAdmissions == 1 && dragClicks == 0 && localReleases == 1 && localCommandAtRelease, "A real pinned cell starts its local drag without firing its menu action")
+dragControl.pinned = false
+dragControl.mouseDown(with:pocketMouse(.leftMouseDown,30,true));dragControl.mouseDragged(with:pocketMouse(.leftMouseDragged,38,true))
+check(dragControl.starts == 2, "Automatic-overflow cells can start Command-reordering without being pinned")
+dragControl.mouseDown(with:pocketMouse(.leftMouseDown,30,true));dragControl.mouseDragged(with:pocketMouse(.leftMouseDragged,38,false));dragControl.mouseDragged(with:pocketMouse(.leftMouseDragged,42,true));dragControl.mouseUp(with:pocketMouse(.leftMouseUp,42,true))
+check(dragControl.starts == 2 && dragClicks == 0, "Releasing Command cancels an armed drag permanently and cannot click through")
+dragControl.mouseDown(with:pocketMouse(.leftMouseDown,30,true));dragControl.mouseUp(with:pocketMouse(.leftMouseUp,30,true))
+check(dragClicks == 1, "A Command-click without movement still invokes the native item once")
+dragControl.isEnabled = false
+dragControl.mouseDown(with:pocketMouse(.leftMouseDown,30,true));dragControl.mouseDragged(with:pocketMouse(.leftMouseDragged,38,true))
+check(dragControl.starts == 2, "Unavailable Pocket controls cannot initiate native drags")
+check(!(dragControl is any NSDraggingSource), "Pocket's local control does not launch a system item drag at the Mission Control edge")
+let localReturn = PocketReturnDropTarget()
+let dropScreen = CGRect(x:0,y:0,width:1470,height:956)
+check(PocketGeometry.dropAnchor(source:CGPoint(x:1210,y:940),screen:dropScreen,menuBarHeight:33)?.midX == 1210,
+      "Pin drop target is anchored at the gesture origin rather than beside the notch")
+check(PocketGeometry.dropAnchor(source:CGPoint(x:-300,y:920),screen:CGRect(x:-1920,y:0,width:1920,height:1080),menuBarHeight:24)?.midX == -300,
+      "Pin drop target keeps its source on a secondary screen with negative coordinates")
+check(PocketGeometry.dropAnchor(source:CGPoint(x:CGFloat.nan,y:940),screen:dropScreen,menuBarHeight:33) == nil,
+      "Invalid drag origins cannot spawn a detached drop target")
+let localRegion = CGRect(x:-3800,y:10,width:300,height:33)
+check(localReturn.show(token:"local-session",frames:[localRegion]), "A local return gesture creates a bounded passive menu-bar target")
+check(localReturn.accepts(token:"local-session",at:NSPoint(x:-3700,y:20),command:true), "Command-release inside the target accepts the current local gesture")
+check(!localReturn.accepts(token:"stale-session",at:NSPoint(x:-3700,y:20),command:true) && !localReturn.accepts(token:"local-session",at:NSPoint(x:-3700,y:20),command:false), "Stale sessions and releasing Command cannot return an item")
+check(!localReturn.accepts(token:"local-session",at:NSPoint(x:-3700,y:0),command:true), "Dropping outside the local menu-bar target cancels return")
+localReturn.close()
+check(!localReturn.accepts(token:"local-session",at:NSPoint(x:-3700,y:20),command:true), "Closing Pocket invalidates all previously shown local return regions")
+dragControlWindow.close()
+
+let pocketKeys = ["app|first","app|second","other|only"]
+check(PocketItemOrder.ordered(pocketKeys,saved:[]) == pocketKeys, "Pocket keeps native inventory order until a user rearranges it")
+check(PocketItemOrder.moving("other|only",relativeTo:"app|first",after:false,visible:pocketKeys,saved:[]) == ["other|only","app|first","app|second"], "Dropping before a Pocket cell moves the exact item, including same-app siblings")
+check(PocketItemOrder.moving("app|first",relativeTo:"other|only",after:true,visible:pocketKeys,saved:[]) == ["app|second","other|only","app|first"], "Dropping after a Pocket cell respects the destination side")
+check(PocketItemOrder.moving("gone",relativeTo:"app|first",after:false,visible:pocketKeys,saved:[]) == nil, "A stale drag source cannot mutate Pocket order")
+check(PocketItemOrder.moving("app|first",relativeTo:"app|first",after:false,visible:pocketKeys,saved:[]) == nil, "Dropping onto the source does not commit a move")
+let savedPocketOrder = ["other|only","sleeping|slot","app|second","app|first"]
+check(PocketItemOrder.ordered(pocketKeys,saved:savedPocketOrder) == ["other|only","app|second","app|first"], "Temporarily absent publishers do not reset saved Pocket order")
+check(prefs.movePocketItem("other|only",relativeTo:"app|first",after:false,visible:pocketKeys) && Preferences(store:store).pocketItemOrder == ["other|only","app|first","app|second"], "Pocket rearrangement survives a fresh preferences instance without changing pins")
 
 let fixture = FileManager.default.temporaryDirectory.appendingPathComponent("Draplet-Icon-\(UUID().uuidString).png")
 let artwork = IndicatorIcons.image(style: .triangle)
@@ -677,7 +1222,33 @@ func runScheduled(_ delay: Double) {
     matching.forEach { $0.1() }
 }
 let visualEngine = TransitionEngine(), visualCover = TestCover()
+let warmEngine = TransitionEngine(), warmCover = TestCover()
+warmEngine.state = .collapsed
+var warmDelays: [Double] = []
+let warmTransition = RightMenuTransition(engine:warmEngine,cover:warmCover,schedule:{ delay,_ in warmDelays.append(delay) })
+warmTransition.expand(style:.curtain,pace:.originalLeft,frame:cover,layoutPrepared:true) {}
+check(warmCover.pending != nil && warmCover.duration == 0.18 && !warmDelays.contains(RightMenuTransition.revealPreparation),
+      "A verified prepared layout begins its curtain without the cold native-geometry pause")
+warmCover.finish()
 let transitions = RightMenuTransition(engine: visualEngine, cover: visualCover, schedule: { scheduled.append(($0, $1)) })
+let settlingEngine = TransitionEngine(), settlingCover = TestCover()
+settlingEngine.state = .collapsed
+var settlingWork: [(Double,()->Void)] = [], sampledLayouts = 0
+let settlingTransition = RightMenuTransition(engine:settlingEngine,cover:settlingCover,schedule:{ settlingWork.append(($0,$1)) })
+settlingTransition.expand(style:.curtain,pace:.originalLeft,frame:cover,prepare:{ done in sampledLayouts += 1; done() }) {}
+check(sampledLayouts == 0 && settlingCover.pending == nil,
+      "Disclosure geometry is sampled after the native settling tail, not before it can reflow")
+let settleForGeometry = settlingWork.filter { $0.0 == RightMenuTransition.revealPreparation }
+settlingWork.removeAll { $0.0 == RightMenuTransition.revealPreparation }; settleForGeometry.forEach { $0.1() }
+check(sampledLayouts == 1 && settlingCover.pending != nil && settlingCover.duration == 0.18,
+      "Settled geometry proceeds directly into the chosen animation without another stale-layout pause")
+settlingCover.finish(); settlingEngine.state = .collapsed
+settlingTransition.expand(style:.curtain,pace:.originalLeft,frame:cover,prepare:{ done in sampledLayouts += 1; done() }) {}
+settlingTransition.cancelAndExpand()
+let cancelledGeometry = settlingWork.filter { $0.0 == RightMenuTransition.revealPreparation }
+cancelledGeometry.forEach { $0.1() }
+check(sampledLayouts == 1 && !settlingCover.isVisible,
+      "A cancelled reveal cannot publish delayed disclosure geometry or resurrect its mask")
 var completed = 0
 transitions.collapse(style: .curtain, pace: .originalLeft, frame: cover) { _ in completed += 1 }
 check(visualEngine.collapses == 0 && visualCover.isVisible && visualCover.duration == 0.16,
@@ -705,10 +1276,17 @@ check(!visualCover.isVisible && visualEngine.state == .calibrating, "Hidden Bar 
 visualEngine.finish(.collapsed); runScheduled(0)
 check(completed == 3, "Native Hidden Bar completes without a custom settling delay")
 let actualRightCover = RightMenuCover()
+let idleShield = PocketCaptureShield()
+let shieldFrame = CGRect(x:-4000,y:0,width:300,height:32)
+idleShield.showMatched(frame:shieldFrame,cancel:{})
+check(!idleShield.handoff(to:CGRect(x:-4000,y:0,width:150,height:32)) && idleShield.isVisible,
+      "An idle capture fence remains until a curtain covers its entire region")
+check(idleShield.handoff(to:shieldFrame) && !idleShield.isVisible,
+      "A closed curtain atomically takes over the idle capture prefix before reveal animation")
 actualRightCover.prepare(frame: NSRect(x: -4000, y: 0, width: 300, height: 32), progress: 0, style: .curtain)
-check(NSApp.windows.first(where: { $0.contentView is RightMenuCover.View })?.animationBehavior == NSWindow.AnimationBehavior.none,
+let actualRightPanel = NSApp.windows.first(where: { $0.windowNumber == actualRightCover.windowNumber })!
+check(actualRightPanel.animationBehavior == NSWindow.AnimationBehavior.none,
       "The actual right panel disables AppKit ordering fades that compete with fast curtain reversals")
-let actualRightPanel = NSApp.windows.first(where: { $0.contentView is RightMenuCover.View })!
 // A fullscreen game can be ordered above a still-logically-visible cover.
 // A background refresh repeats the unchanged `false` suppression state; it
 // must not order that cover above the game again.
@@ -748,6 +1326,37 @@ visualCover.finish(); visualEngine.finish(.collapsed); runScheduled(RightMenuTra
 transitions.cancelAndExpand()
 check(!visualCover.isVisible && visualEngine.state == .expanded,
       "Pausing or reconfiguring still removes a retained closed curtain and releases native hiding")
+// Exercise the real native engine + visual coordinator together. Native pin
+// activation may outlive the old fixed 300 ms reveal delay.
+let delayedItems = Items(), delayedReader = Inventory(), delayedBridge = Visibility()
+let delayedEngine = NativeVisibilityEngine(items:delayedItems,inventory:delayedReader,visibility:delayedBridge,ownBundleIdentifier:"own",itemFrame:{ _ in frame(600) },isLTR:{true})
+delayedEngine.collapse { _ in }; delayedReader.finish(); delayedBridge.finish(.success(Handle()))
+delayedEngine.updatePocketPlacement(pinned:["visible"],owners:pinOwners); delayedBridge.finish(.success(Handle()))
+let delayedCover = TestCover()
+var delayedWork: [(Double,()->Void)] = []
+let delayedTransition = RightMenuTransition(engine:delayedEngine,cover:delayedCover,schedule:{ delayedWork.append(($0,$1)) })
+delayedTransition.expand(style:.curtain,pace:.originalLeft,frame:cover) {}
+let prematureReveal = delayedWork.filter { $0.0 == RightMenuTransition.revealPreparation }
+delayedWork.removeAll { $0.0 == RightMenuTransition.revealPreparation }; prematureReveal.forEach { $0.1() }
+check(delayedCover.pending == nil && delayedCover.progress == 0,
+      "A pin-restricted reveal waits for the actual native activation before unveiling, even past 300 ms")
+delayedBridge.finish(.success(Handle()))
+let preparedReveal = delayedWork.filter { $0.0 == RightMenuTransition.revealPreparation }
+delayedWork.removeAll { $0.0 == RightMenuTransition.revealPreparation }; preparedReveal.forEach { $0.1() }
+check(delayedCover.pending != nil, "Accepted native reveal proceeds through the settling tail and visual animation")
+delayedCover.finish()
+delayedEngine.stagePocketCapture(["hidden"],preservingVisible:true) { _ in }
+check(delayedBridge.systemItems == NativeVisibilityEngine.systemItemsToKeep && delayedBridge.allowed.contains("visible"),
+      "Idle glyph preparation keeps fixed system controls and the user's visible applications in place")
+delayedBridge.finish(.success(Handle()));delayedEngine.finishPocketCapture();delayedBridge.finish(.success(Handle()))
+delayedEngine.stagePocketCapture(["visible"]) { _ in }
+let captureActivations = delayedBridge.activations
+var newerOwners = pinOwners; newerOwners["late-app"] = ["late-app"]
+delayedEngine.updatePocketPlacement(pinned:["visible"],owners:newerOwners)
+check(delayedBridge.activations == captureActivations,
+      "Inventory changes during Pocket capture cannot supersede its native exposure or flash the unrestricted bar")
+delayedBridge.finish(.success(Handle())); delayedEngine.finishPocketCapture(); delayedBridge.finish(.success(Handle()))
+delayedEngine.updatePocketPlacement(pinned:[],owners:[:]); delayedEngine.expand()
 var captureRetry = CaptureRetryPolicy()
 check(captureRetry.failed(permissionGranted: false) == nil, "Denied capture permission never triggers an automatic retry")
 check(captureRetry.failed(permissionGranted: true) == 0.5, "A transient interruption gets a short first retry")

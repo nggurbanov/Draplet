@@ -72,10 +72,11 @@ final class RightMenuCover: TransitionCover {
     final class View: NSView {
         var progress = 1.0 { didSet { needsDisplay = true } }
         var style = BarAnimation.curtain { didSet { needsDisplay = true } }
+        var revealExtent: CGFloat? { didSet { needsDisplay = true } }
         override var isOpaque: Bool { false }
         override func draw(_ dirtyRect: NSRect) {
             NSColor.clear.setFill(); bounds.fill(using: .copy)
-            MenuMaskDrawing.draw(in: bounds, progress: progress, style: style, mirrored: true) {
+            MenuMaskDrawing.draw(in: bounds, progress: progress, style: style, mirrored: true, extent:revealExtent) {
                 MenuBarBackdrop.shared.draw(in: self.bounds, screenRect: self.window?.frame ?? .zero, operation: .sourceIn)
             }
         }
@@ -84,7 +85,11 @@ final class RightMenuCover: TransitionCover {
     private var timer: Timer?
     private var wantsVisible = false
     private var presentationSuppressed = false
+    private var revealExtent: CGFloat?
     var isVisible: Bool { wantsVisible }
+    var isPresented: Bool { panel?.isVisible == true }
+    var windowNumber: Int? { isPresented ? panel?.windowNumber : nil }
+    var maskingWindow: NSWindow? { isPresented ? panel : nil }
     var progress: Double { (panel?.contentView as? View)?.progress ?? 1 }
     func prepare(frame: NSRect, progress: Double, style: BarAnimation) {
         cancelAnimation()
@@ -102,9 +107,18 @@ final class RightMenuCover: TransitionCover {
             panel = window
         }
         panel?.setFrame(frame, display: false)
-        if let view = panel?.contentView as? View { view.progress = progress; view.style = style }
+        if let view = panel?.contentView as? View {
+            view.progress = progress; view.style = style
+            if progress == 0 || progress == 1 { view.revealExtent = revealExtent }
+        }
         if !presentationSuppressed { panel?.orderFrontRegardless() }
         panel?.displayIfNeeded()
+    }
+    func setRevealExtent(_ extent: CGFloat?) {
+        revealExtent = extent.map { max(0,$0) }
+        // Preserve the current edge if the user reverses a moving curtain.
+        guard progress == 0 || progress == 1 else { return }
+        (panel?.contentView as? View)?.revealExtent = revealExtent
     }
     func animate(to target: Double, duration: Double, completion: @escaping () -> Void) {
         cancelAnimation()
@@ -133,7 +147,12 @@ final class RightMenuCover: TransitionCover {
         if suppressed { panel?.orderOut(nil) }
         else if wantsVisible { panel?.orderFrontRegardless(); panel?.displayIfNeeded() }
     }
-    func dismiss() { wantsVisible = false; cancelAnimation(); panel?.orderOut(nil) }
+    func dismiss() {
+        // The disclosure remains after reveal. Detach it before ordering its
+        // temporary masking parent out, avoiding a hide/show blink at the end.
+        for child in panel?.childWindows ?? [] { panel?.removeChildWindow(child) }
+        wantsVisible = false; cancelAnimation(); panel?.orderOut(nil)
+    }
     func stop() { dismiss(); panel?.close(); panel = nil }
 }
 
@@ -148,33 +167,48 @@ final class RightMenuTransition {
     private let schedule: Schedule
     private var generation = 0
     private(set) var expanded = true
+    private(set) var isTransitioning = false
     init(engine: MenuBarEngine, cover: TransitionCover,
          schedule: @escaping Schedule = { seconds, body in DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: body) }) {
         self.engine = engine; self.cover = cover; self.schedule = schedule
     }
-    func expand(style: BarAnimation, pace: AnimationPace, frame: NSRect?, onStart: @escaping () -> Void = {}, completion: @escaping () -> Void) {
+    func expand(style: BarAnimation, pace: AnimationPace, frame: NSRect?, layoutPrepared: Bool = false, prepare: @escaping (@escaping () -> Void) -> Void = { $0() }, onStart: @escaping () -> Void = {}, completion: @escaping () -> Void) {
         generation += 1; let token = generation
         let needsPreparation = engine.state == .collapsed || engine.state == .calibrating
-        expanded = true; cover.cancelAnimation()
-        guard style != .hiddenBar, let frame else {
-            cover.dismiss(); engine.expand(); onStart(); completion(); return
-        }
-        let progress = cover.isVisible ? cover.progress : (needsPreparation ? 0 : 1)
-        cover.prepare(frame: frame, progress: progress, style: style)
-        engine.expand()
-        let start = { [weak self] in
+        expanded = true; isTransitioning = true; cover.cancelAnimation()
+        let custom = style != .hiddenBar && frame != nil
+        if custom, let frame {
+            let progress = cover.isVisible ? cover.progress : (needsPreparation ? 0 : 1)
+            cover.prepare(frame:frame,progress:progress,style:style)
+        } else { cover.dismiss() }
+        engine.expand { [weak self] _ in
             guard let self, token == self.generation else { return }
-            onStart()
-            self.cover.animate(to: 1, duration: pace.duration(opening: true)) { [weak self] in
+            let prepareAndReveal = { [weak self] in
                 guard let self, token == self.generation else { return }
-                self.cover.dismiss(); completion()
+                prepare { [weak self] in
+                    guard let self, token == self.generation else { return }
+                    onStart()
+                    guard custom else { self.isTransitioning = false; completion(); return }
+                    self.cover.animate(to:1,duration:pace.duration(opening:true)) { [weak self] in
+                        guard let self, token == self.generation else { return }
+                        self.cover.dismiss(); self.isTransitioning = false; completion()
+                    }
+                }
             }
+            // Read the disclosure's final slot after macOS's presentation tail.
+            // Measuring before this wait can leave the arrow over a stale slot
+            // while the native icons finish reflowing beneath the closed mask.
+            if needsPreparation && custom && !layoutPrepared { self.schedule(Self.revealPreparation,prepareAndReveal) }
+            else { prepareAndReveal() }
         }
-        if needsPreparation { schedule(Self.revealPreparation, start) } else { start() }
+        schedule(3) { [weak self] in
+            guard let self, token == self.generation, self.isTransitioning else { return }
+            self.cancelAndExpand(); completion()
+        }
     }
     func collapse(style: BarAnimation, pace: AnimationPace, frame: NSRect?, completion: @escaping (CollapseResult) -> Void) {
         generation += 1; let token = generation
-        expanded = false; cover.cancelAnimation()
+        expanded = false; isTransitioning = true; cover.cancelAnimation()
         if engine.state == .calibrating { engine.expand() }
         let native = { [weak self] in
             guard let self, token == self.generation else { return }
@@ -186,10 +220,10 @@ final class RightMenuTransition {
                         // The assertion has been accepted, not necessarily presented. Keep
                         // the closed cover across native animation tails and fast reversals;
                         // expand removes it only after our reveal is complete.
-                        completion(result)
+                        self.isTransitioning = false; completion(result)
                     }
                 } else {
-                    self.expanded = true; self.cover.dismiss(); completion(result)
+                    self.expanded = true; self.isTransitioning = false; self.cover.dismiss(); completion(result)
                 }
             }
             self.schedule(2) { [weak self] in
@@ -203,6 +237,6 @@ final class RightMenuTransition {
         cover.animate(to: 0, duration: pace.duration(opening: false), completion: native)
     }
     func cancelAndExpand() {
-        generation += 1; expanded = true; cover.dismiss(); engine.expand()
+        generation += 1; expanded = true; isTransitioning = false; cover.dismiss(); engine.expand()
     }
 }

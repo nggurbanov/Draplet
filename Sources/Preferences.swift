@@ -8,10 +8,20 @@ enum Constant {
 }
 
 final class Preferences: ObservableObject {
+    static func canPinPocketBundle(_ bundle: String) -> Bool {
+        // Spotlight/Campo publish individually hosted extras and can use the
+        // bundle visibility policy. Shared system controls and input selection
+        // cannot be moved independently through this path.
+        !bundle.isEmpty && bundle != Bundle.main.bundleIdentifier && !MenuBarLayoutResolver.systemItemOwners.contains(bundle)
+            && bundle != "com.apple.TextInputMenuAgent"
+    }
     static let shared = Preferences()
     private let store: UserDefaults
     @Published var leftEnabled: Bool { didSet { save(leftEnabled, "leftEnabled") } }
     @Published var rightRevealMode: RightRevealMode { didSet { save(rightRevealMode.rawValue, "rightRevealMode") } }
+    @Published private(set) var pinnedPocketBundles: [String] { didSet { save(pinnedPocketBundles, "pinnedPocketBundles") } }
+    @Published private(set) var pocketItemOrder: [String] { didSet { save(pocketItemOrder,"pocketItemOrder") } }
+    @Published private(set) var compatibilityMenuItems: [String: Int] { didSet { save(compatibilityMenuItems, "compatibilityMenuItems") } }
     @Published var rightEnabled: Bool { didSet { save(rightEnabled, "rightEnabled") } }
     @Published var autoCollapse: Bool { didSet { save(autoCollapse, "autoCollapse") } }
     @Published var collapseDelay: Double { didSet { save(collapseDelay, "collapseDelay") } }
@@ -45,18 +55,24 @@ final class Preferences: ObservableObject {
     @Published var error = ""
     var needsAccessibility: Bool { !paused && (leftEnabled || rightEnabled) }
     var needsBackground: Bool {
-        needsAccessibility && permissionGranted && (leftEnabled || (rightEnabled && animation(for: .right) != .hiddenBar))
+        needsAccessibility && permissionGranted && (leftEnabled || (rightEnabled && (animation(for: .right) != .hiddenBar || rightRevealMode == .pocket)))
     }
     var needsIconCapture: Bool { needsAccessibility && rightEnabled && rightRevealMode == .pocket }
     var needsScreenCapture: Bool { needsBackground || needsIconCapture }
-    var requiresSetup: Bool { (needsAccessibility && !permissionGranted) || (needsBackground && !backgroundPermission) }
+    var requiresSetup: Bool { (needsAccessibility && !permissionGranted) || (needsScreenCapture && !backgroundPermission) }
     init(store: UserDefaults = .standard) {
         self.store = store
         store.register(defaults: ["leftEnabled": true, "rightEnabled": true, "autoCollapse": true,
                                  "collapseDelay": 5.0, "hoverRight": false, "alwaysHidden": false,
                                  "fullWidth": false, "shortcut": 0])
         leftEnabled = store.bool(forKey: "leftEnabled")
-        rightRevealMode = RightRevealMode(rawValue: store.string(forKey: "rightRevealMode") ?? "") ?? .menuBar
+        var seenPins = Set<String>()
+        pinnedPocketBundles = (store.stringArray(forKey: "pinnedPocketBundles") ?? []).filter {
+            Self.canPinPocketBundle($0) && seenPins.insert($0).inserted
+        }
+        pocketItemOrder = Array(PocketItemOrder.unique(store.stringArray(forKey:"pocketItemOrder") ?? []).prefix(1024))
+        compatibilityMenuItems = CompatibilityMenuPolicy.validated(store.dictionary(forKey: "compatibilityMenuItems") as? [String: Int] ?? [:])
+        rightRevealMode = RightRevealMode(rawValue: store.string(forKey: "rightRevealMode") ?? "") ?? .pocket
         rightEnabled = store.bool(forKey: "rightEnabled")
         autoCollapse = store.bool(forKey: "autoCollapse")
         collapseDelay = store.double(forKey: "collapseDelay")
@@ -88,7 +104,26 @@ final class Preferences: ObservableObject {
         shortcut = (0...3).contains(savedShortcut) ? savedShortcut : 3
     }
     func icon(for side: BarSide) -> IndicatorStyle { sameIcons ? sharedIcon : (side == .left ? leftIcon : rightIcon) }
+    func setPocketPin(_ bundle: String, pinned: Bool) {
+        guard Self.canPinPocketBundle(bundle) else { return }
+        if pinned {
+            let kept = compatibilityMenuItems.filter { !$0.key.hasPrefix(bundle + "|") }
+            if kept != compatibilityMenuItems { compatibilityMenuItems = kept }
+            if rightRevealMode != .pocket { rightRevealMode = .pocket }
+            if !pinnedPocketBundles.contains(bundle) { pinnedPocketBundles.append(bundle) }
+        } else if pinnedPocketBundles.contains(bundle) { pinnedPocketBundles.removeAll { $0 == bundle } }
+    }
+    @discardableResult func movePocketItem(_ source:String, relativeTo target:String, after:Bool, visible:[String]) -> Bool {
+        guard let order = PocketItemOrder.moving(source,relativeTo:target,after:after,visible:visible,saved:pocketItemOrder) else { return false }
+        pocketItemOrder = order; return true
+    }
     func customIcon(for side: BarSide) -> Data? { sameIcons ? sharedCustomIcon : (side == .left ? leftCustomIcon : rightCustomIcon) }
+    func setCompatibilityItem(_ key: String, section: MenuBarSection?) {
+        var next = compatibilityMenuItems
+        next[key] = section?.rawValue
+        next = CompatibilityMenuPolicy.validated(next)
+        if next != compatibilityMenuItems { compatibilityMenuItems = next }
+    }
     func trigger(for side: BarSide) -> RevealTrigger { sameTrigger ? sharedTrigger : (side == .left ? leftTrigger : rightTrigger) }
     func animation(for side: BarSide) -> BarAnimation {
         let value = sameAnimation ? sharedAnimation : (side == .left ? leftAnimation : rightAnimation)

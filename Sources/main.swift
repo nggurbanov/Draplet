@@ -18,6 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var hiddenBarWasRunning = false
     var terminating = false
     var previewGeneration = 0
+    var pocketDragProbe: PocketDragProbe?
+    private var dragQAAssertion: NativeVisibilityAssertion?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let siblings = NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "com.tyrell.Draplet")
@@ -26,6 +28,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             exit(0)
         }
         makeMenus()
+        if CommandLine.arguments.contains("--probe-pocket-drag") || CommandLine.arguments.contains("--probe-pocket-drag-intercept") {
+            pocketDragProbe = PocketDragProbe(intercept: CommandLine.arguments.contains("--probe-pocket-drag-intercept"))
+            return
+        }
         AppUpdater.shared.start()
         // Packaging-only fixtures exercise the actual updater without starting
         // menu-bar engines or asking for hardware permissions.
@@ -41,12 +47,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                       replaceHiddenBar: { [weak self] in self?.right.replaceHiddenBar() },
                                       revealBoth: { [weak self] in self?.revealBoth() }, pause: { [weak self] in self?.togglePause() },
                                       previewAnimations: { [weak self] in self?.previewAnimations() })
-        right.onSettings = { [weak self] in self?.settings.show() }
+        right.onSettings = { [weak self] in self?.settings.navigation.page = .right; self?.settings.show() }
         left.onSettings = { [weak self] in self?.settings.show() }
+        left.isInteractingWithRight = { [weak self] in self?.right.containsInteraction ?? false }
         MenuBarBackdrop.shared.onPresentationTick = { [weak self] in self?.left.tick() }
         right.onPause = { [weak self] in self?.togglePause() }
         right.onRevealAll = { [weak self] in self?.revealBoth() }
         right.isSettingsVisible = { [weak self] in self?.settings.window?.isVisible ?? false }
+        for name in [NSWorkspace.didLaunchApplicationNotification,NSWorkspace.didTerminateApplicationNotification] {
+            observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName:name,object:nil,queue:.main) { [weak self] _ in self?.right.inventoryDidChange() })
+        }
         observers.append(NotificationCenter.default.addObserver(forName: .drapletPreferencesChanged, object: nil, queue: .main) { [weak self] _ in self?.applyPreferences() })
         observers.append(NotificationCenter.default.addObserver(forName: MenuBarBackdrop.didChange, object: nil, queue: .main) { [weak self] _ in
             guard let self, !self.terminating else { return }
@@ -151,8 +161,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     @objc func togglePause() { prefs.paused.toggle(); applyPreferences() }
     @objc func revealBoth() {
-        if prefs.rightRevealMode == .pocket && right.canManage { left.revealForShortcut(); right.showPocket(all: true) }
-        else { right.expand(all: true) { [weak self] in self?.left.revealForShortcut() } }
+        right.expand(all: true) { [weak self] in self?.left.revealForShortcut() }
     }
     func previewAnimations() {
         previewGeneration += 1; let token = previewGeneration
@@ -218,7 +227,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let result = RegisterEventHotKey(key, UInt32(controlKey | optionKey), EventHotKeyID(signature: 0x44524150, id: 1), GetApplicationEventTarget(), 0, &hotkey)
         if result != noErr { prefs.error = "The reveal shortcut is already in use. Choose another in Shortcuts." }
     }
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { settings?.show(); return true }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if CommandLine.arguments.contains("--test-controls") && CommandLine.arguments.contains("--qa-no-reopen") { return false }
+        settings?.show(); return true
+    }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         // Let AppKit finish termination so Sparkle can install a staged update.
         // Cleanup stays idempotent and releases all native assertions.
@@ -233,6 +245,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MenuBarBackdrop.shared.onPresentationTick = nil
         permissionMonitor.stop()
         pulse?.invalidate(); left.stop(); right?.stop(); MenuBarBackdrop.shared.stop()
+        // Capture work is stopped; drain its last-good writes before AppKit exits.
+        PocketImageCache.shared.flush()
         if let hotkey { UnregisterEventHotKey(hotkey) }
         if let eventHandler { RemoveEventHandler(eventHandler) }
         for observer in observers {
@@ -277,8 +291,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             "hitWindow": self.left.clickPanel?.windowNumber ?? 0,
                             "hitVisible": self.left.clickPanel?.isVisible ?? false,
                             "leftArrowFrame": self.left.frameJSON(self.left.clickPanel?.frame ?? .zero),
+                            "arrowAccessibleFrame": self.left.frameJSON(self.right.toggleItem.button?.accessibilityFrame() ?? .zero),
                             "arrowFrame": self.left.frameJSON(self.right.toggleItem.button?.window?.frame ?? .zero)]
                         var output = status
+                        output["build"] = Bundle.main.object(forInfoDictionaryKey:"CFBundleVersion") as? String ?? ""
                         output["dockVisible"] = NSApp.activationPolicy() == .regular
                         output["settingsVisible"] = self.settings.window?.isVisible ?? false
                         let data = try! JSONSerialization.data(withJSONObject: output, options: .sortedKeys)
@@ -292,12 +308,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     case "capture-failure": MenuBarBackdrop.shared.fail("Injected transient capture interruption (QA)")
                     case "pocket": self.prefs.rightRevealMode = .pocket; self.right.showPocket()
                     case "pocket-toggle": self.right.togglePocket()
+                    case "qa-pocket-cache-failure": self.right.testPocketCacheFailure()
+                    case "qa-pocket-return-fixture": self.right.testPocketReturnFixture()
+                    case "qa-pocket-return-overflow-fixture": self.right.testPocketReturnFixture(pinned:false)
+                    case "qa-compatibility-click-fixture": self.right.testCompatibilityClickFixture()
+                    case "qa-compatibility-refresh-fixture": self.right.testCompatibilityRefreshFixture()
+                    case "qa-pocket-display-change": NotificationCenter.default.post(name:NSApplication.didChangeScreenParametersNotification,object:nil)
                     case "menu-bar": self.prefs.rightRevealMode = .menuBar
                     case "right-click": self.right.toggleItem.button?.performClick(nil)
                     case "expand": self.right.expand()
                     case "collapse": self.right.collapse()
+                    case "auto-hide-on": self.prefs.autoCollapse = true
+                    case "auto-hide-off": self.prefs.autoCollapse = false
                     case "reveal": self.revealBoth()
                     case "settings": self.settings.show()
+                    case "settings-right": self.settings.navigation.page = .right; self.settings.show()
+                    case "qa-drag-isolate":
+                        NativeVisibilityBridge().activate(allowedSystemItems:NativeVisibilityEngine.systemItemsToKeep,allowedBundleIdentifiers:["com.tyrell.Draplet","org.drapletqa.drag"]) { result in
+                            if case .success(let assertion) = result { self.dragQAAssertion?.invalidate(); self.dragQAAssertion = assertion; print("QA TEST isolated"); fflush(stdout) }
+                        }
+                    case "qa-drag-restore": self.dragQAAssertion?.invalidate(); self.dragQAAssertion = nil
                     case "settings-close": self.settings.window?.close()
                     case "appearance-light": self.settings.window?.appearance = NSAppearance(named: .aqua); self.right.setPocketAppearance(NSAppearance(named: .aqua))
                     case "appearance-dark": self.settings.window?.appearance = NSAppearance(named: .darkAqua); self.right.setPocketAppearance(NSAppearance(named: .darkAqua))
@@ -324,6 +354,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     case "pause": self.togglePause()
                     case "quit": NSApp.terminate(nil)
                     default:
+                        if line.hasPrefix("preview-drop:") {
+                            let bundle = String(line.dropFirst(13))
+                            PocketInventory.read { [weak self] items in if let item = items.first(where:{ $0.bundle == bundle }) { self?.right.showDropTarget(item); self?.right.focusDropPreview() } }
+                        }
+                        if line == "preview-drop-cancel" { self.right.cancelDropTarget() }
+                        if line.hasPrefix("drag-source:"), let comma = line.firstIndex(of:","),
+                           let x = Double(line[line.index(line.startIndex,offsetBy:12)..<comma]), let y = Double(line[line.index(after:comma)...]) {
+                            DispatchQueue.global(qos:.userInitiated).async {
+                                let item = PocketInventory.dragSource(at:CGPoint(x:x,y:y),area:CGRect(x:0,y:0,width:CGDisplayBounds(CGMainDisplayID()).width,height:80))
+                                print("QA drag source: \(item?.0.bundle ?? "none") \(item?.0.name ?? "")"); fflush(stdout)
+                            }
+                        }
+                        if line.hasPrefix("pin:") { self.right.setPocketPin(String(line.dropFirst(4)), pinned:true) }
+                        if line.hasPrefix("unpin:") { self.right.setPocketPin(String(line.dropFirst(6)), pinned:false) }
                         if line.hasPrefix("pocket-left:") { self.right.activatePocketItem(String(line.dropFirst(12)), button: .left) }
                         if line.hasPrefix("pocket-right:") { self.right.activatePocketItem(String(line.dropFirst(13)), button: .right) }
                     }

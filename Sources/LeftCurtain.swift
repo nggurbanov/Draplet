@@ -43,6 +43,7 @@ private struct IndicatorLayout: Equatable {
 private var indicatorLayout: IndicatorLayout?
 var manuallyCollapsed = false
 var onSettings: (() -> Void)?
+var isInteractingWithRight: () -> Bool = { false }
 private let prefs = Preferences.shared
 
 func frameJSON(_ r: CGRect) -> [String: Double] {
@@ -306,7 +307,8 @@ func tick() {
     } else {
         enteredAt = nil
         if menuIsTracking { lastInside = now; setReveal(true, "menu-open") }
-        else if now.timeIntervalSince(lastInside) > 0.32 { setReveal(false, "pointer-left") }
+        else if isInteractingWithRight() { lastInside = now }
+        else if now.timeIntervalSince(lastInside) > prefs.collapseDelay { setReveal(false, "pointer-left") }
     }
 }
 
@@ -319,7 +321,7 @@ func syncVisibility() {
     updateClickTarget()
 }
 
-func setPresentationSuppressed(_ suppressed: Bool) {
+func setPresentationSuppressed(_ suppressed: Bool, presentationActive: () -> Bool = SystemPresentation.current) {
     guard presentationSuppressed != suppressed else { return }
     presentationSuppressed = suppressed
     guard enabled else { return }
@@ -328,7 +330,7 @@ func setPresentationSuppressed(_ suppressed: Bool) {
         menuIsTracking = false
         panel?.orderOut(nil); clickPanel?.orderOut(nil)
     } else if let view = panel?.contentView as? CoverView {
-        updateTitle()
+        updateTitle(presentationActive: presentationActive)
         let open = revealed || (prefs.trigger(for: .left) == .hover && coverFrame.contains(NSEvent.mouseLocation))
         // The real bar has already returned. Restore its title/arrow at full
         // opacity, then close the command menus with Draplet's normal animation.

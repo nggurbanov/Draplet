@@ -15,6 +15,13 @@ resolved. If it is unavailable, Draplet leaves the icons visible. Restrictions
 are released when Draplet quits or its process exits. No assessment session,
 keyboard lock, or other system restriction is activated.
 
+# Vorssaint availability format
+
+`Sources/MenuBarAvailability.swift` references the Control Center availability
+format described by Vorssaint's `App/MenuBarAllowanceSupport.swift`,
+Copyright (C) 2026 Vorssaint, under GPL-3.0-or-later. This prevents capture of
+status items explicitly disabled by macOS. The complete GPL accompanies Draplet.
+
 # Sparkle
 
 Draplet includes [Sparkle 2.10.0](https://github.com/sparkle-project/Sparkle/releases/tag/2.10.0)
@@ -32,3 +39,10 @@ local modifications dated 2026-10-18. The complete license is in `Vendor/Ice/LIC
 and included as `Ice-LICENSE` in app Resources. Draplet as a whole is distributed
 under GPL v3; existing MIT components retain their notices. The original Draplet
 MIT notice is retained in `LICENSES/Draplet-original-MIT.txt` and the app Resources.
+
+## Thaw
+
+Native host geometry and overflow identification adapt selected mechanisms from
+[Thaw](https://github.com/thaw-app/Thaw), Copyright (Thaw) © 2026 Toni Förster,
+under GPL v3. Exact revision, source paths and modifications are retained in
+`Vendor/Thaw/ORIGIN.md`; its license is included as `Thaw-LICENSE` in app Resources.

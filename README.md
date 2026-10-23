@@ -13,8 +13,17 @@ Alpha downloads are not Developer ID signed or notarized.
 
 - Hide File, Edit, View and other application menus behind a left-side curtain.
 - Hide selected menu-bar icons on the right, with an optional always-hidden section.
-- Open hidden icons in an optional [Pocket grid](docs/POCKET.md), with status imagery,
-  application-artwork fallbacks and access to their native actions.
+- Keep the right arrow’s native accordion reveal. Only while the right strip is
+  expanded, a separate [Pocket](docs/POCKET.md) down/up chevron sits leftmost,
+  before every visible status icon, and opens real overflow or pinned items in a
+  compact native popover. Collapsing immediately hides this control.
+- With Curtain selected, Pocket and the right status icons reveal together under
+  the existing mirrored curtain, using the selected pace.
+- Keep chosen apps in Pocket even when the bar has room. ⌘-drag a status icon
+  into Pocket to pin its app; ⌘-drag a pinned icon back to the menu bar to return it.
+  Expand the original horizontal arrow to reach saved pins. Right settings also
+  provides explicit placement controls. On macOS 27, all
+  status icons from one pinned app move together.
 - Reveal on hover or click, with shared or independent behavior for each side.
 - Curtain and Fade animations, plus a native Hidden Bar mode for the right side.
 - Matching or independent indicators, built-in presets and custom image import.
@@ -29,8 +38,10 @@ Alpha downloads are not Developer ID signed or notarized.
   other supported OS versions and Intel Macs still need hardware validation.
   Binary artifacts prepared on Apple silicon are arm64; Intel users must build locally.
 - Accessibility access reads menu positions and fullscreen window state.
-- Background matching requires Screen & System Audio Recording permission.
-  Draplet captures no audio; the menu-bar background is processed locally in memory.
+- Background matching and Pocket icon capture require Screen & System Audio
+  Recording permission. Draplet captures no audio; images are processed locally.
+  Pocket keeps a bounded local cache of last-good native glyphs on disk and never
+  substitutes application artwork.
 - Left-side hiding is a visual overlay. It does not free space for more status icons.
 - macOS owns the menu bar during native fullscreen and Mission Control.
   Draplet withdraws its visual overlays and restores them after the desktop background settles.
@@ -97,11 +108,20 @@ Do not disable Gatekeeper or other system protections globally.
 bash test.sh
 ```
 
-The current suite has 195 checks covering icon layout, preferences, rendering,
-transition cancellation, native-engine lifecycle, fullscreen detection, overlay ordering
-and Pocket capture/action policies and spanning-grid navigation.
-Captured, minimized window-state fixtures cover the Minecraft and Fladder regressions.
-Passing these checks is not a substitute for testing gestures and fullscreen on real hardware.
+The 0.5.0 build-45 candidate passes 378 lifecycle, policy, rendering and
+animation checks. The local native harness passes 17 scenarios, including rapid
+reversals, actual arrow input, Pocket caching, fullscreen suppression and desktop
+restoration. A separate two-publisher regression verifies 12 menu activations
+without clicks reaching a foreign transparent blocker.
+
+These are local alpha checks on macOS 27 / Apple silicon. Physical Command-drag,
+arbitrary publisher popovers, older macOS, Intel and multiple displays still need
+broader acceptance. Returning an unsupported extra may use a native compatibility
+slot with its cached real glyph; changing counters/artwork need **Refresh Icons**.
+See [release readiness](docs/RELEASE_READINESS.md) and the
+[Pocket QA instructions](docs/POCKET.md#native-qa-harness) for scope and reproduction.
+Captured window-state fixtures cover the Minecraft and Fladder regressions;
+fixtures do not replace real hardware testing.
 
 The UI is SwiftUI and AppKit. `Sources/LeftCurtain.swift` owns the left overlay;
 `Sources/RightCurtain.swift` integrates icon hiding and right transitions;
@@ -121,7 +141,11 @@ and logs before sharing them. There is no automatic telemetry or crash-log uploa
 
 Draplet is distributed under [GNU GPL version 3](LICENSE).
 Pocket includes adapted code from [Ice](https://github.com/jordanbaird/Ice) by Jordan Baird and contributors.
-Exact upstream provenance and modifications are recorded in [Vendor/Ice/ORIGIN.md](Vendor/Ice/ORIGIN.md).
+Native MenuBarAgent geometry and identity matching also adapt work from
+[Thaw](https://github.com/thaw-app/Thaw) by Toni Förster, under GPL v3.
+Exact upstream provenance and modifications are recorded in
+[Vendor/Ice/ORIGIN.md](Vendor/Ice/ORIGIN.md) and
+[Vendor/Thaw/ORIGIN.md](Vendor/Thaw/ORIGIN.md).
 The original MIT notice for pre-GPL Draplet code is retained in `LICENSES/Draplet-original-MIT.txt`.
 When distributing binaries, provide the corresponding source for that exact build,
 including build scripts, vendored adaptations, required dependency sources and

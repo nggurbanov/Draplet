@@ -16,3 +16,11 @@ symbol lookup and bounded allocation; namespaced event helper; on-demand capture
 native macOS 27 per-bundle reveal instead of physically moving icons; independent
 SwiftUI grid, settings, cancellation and presentation suppression integration.
 This is an adaptation of selected mechanisms, not an unmodified Ice component.
+
+Draplet addition (2026-10-23): automatic Pocket overflow can return via a
+bounded native Command status-item move after fresh host-frame validation.
+Events carry a Draplet-only tag to avoid recursive pin recognition; button-up
+is always posted, and cursor restoration is conditional on no intervening
+pointer movement. The result is checked again after native visibility restores.
+No preferred-position table writes, external runtime binaries or persistent
+input-suppression services are used for this path.

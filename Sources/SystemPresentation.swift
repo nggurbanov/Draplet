@@ -19,14 +19,31 @@ final class PresentationOptionsCache {
     func invalidate() { sampledAt = -Double.infinity }
 }
 
+final class SessionVisibilityCache {
+    private let read: () -> Bool
+    private var sampledAt = -Double.infinity
+    private var active = true
+    init(read: @escaping () -> Bool = {
+        guard let session = CGSessionCopyCurrentDictionary() as? [String:Any] else { return false }
+        return (session["CGSSessionScreenIsLocked"] as? Bool) != true
+            && (session[kCGSessionOnConsoleKey as String] as? Bool) == true
+    }) { self.read = read }
+    func isActive(at time: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
+        if time - sampledAt >= 0.25 { active = read(); sampledAt = time }
+        return active
+    }
+}
+
 enum SystemPresentation {
     private static let options = PresentationOptionsCache()
+    private static let session = SessionVisibilityCache()
     static func invalidateOptions() { options.invalidate() }
     private static var dockPID: pid_t?
     static func forgetDock(pid: pid_t) { if dockPID == pid { dockPID = nil } }
     private static var geometry: (displays: [CGRect], menuBar: CGRect)?
     static func invalidateDisplays() { geometry = nil; WindowServerSnapshot.shared.invalidate() }
     static func current() -> Bool {
+        guard session.isActive() else { return true }
         let frontPID = ForegroundApplication.shared.current()?.pid ?? 0
         let nativeFullscreen = ForegroundFullscreen.shared.current(pid: frontPID)
         if nativeFullscreen { return true }

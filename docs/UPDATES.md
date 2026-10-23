@@ -25,16 +25,16 @@ re-granting macOS permissions; test the beta signing transition separately.
    `Resources/Info.plist`. Add `updates/<version>.html` release notes.
 2. Run `bash test.sh` and `bash scripts/prepare-release.sh` on macOS.
    It creates a DMG, symlink-preserving updater ZIP, SHA-256 file and candidate appcast
-   in ignored `dist/`. It does not upload or publish anything.
+   and corresponding-source archive in ignored `dist/`. It does not upload or publish anything.
 3. Verify the actual N→N+1 update, failure paths, mounted DMG and current app behavior.
 4. Prepare and verify GPL v3 corresponding source for the exact binary build.
    Include the matching application source, build/install scripts, vendored
    adaptations and license notices, plus required dependency sources and build
    instructions. Preserve the original MIT and component notices and confirm
-   the Ice revision in `Vendor/Ice/ORIGIN.md`. A dependency download URL or an
+   the Ice and Thaw revisions in `Vendor/Ice/ORIGIN.md` and
+   `Vendor/Thaw/ORIGIN.md`. A dependency download URL or an
    attribution alone is not a substitute for required corresponding source.
-   No automated corresponding-source archive generator is implemented; the
-   existing release script prepares binary artifacts only.
+   `scripts/prepare-source.py` creates the matching source archive and manifest.
 5. Publish the ZIP, DMG, SHA-256 file and matching corresponding-source material
    at GitHub tag `v<version>`. Verify the public downloads and that the source
    actually matches the packaged build.
@@ -49,10 +49,17 @@ on this feed; key rotation requires a separately tested migration.
 
 ## Current acceptance boundary
 
-The local candidate is 0.5.0 build 14 with Pocket. The public v0.5.0 release
-remains a build-13 draft and the production feed is empty. Build-13 updater and
-DMG results are historical; rerun them against the final build-14 artifacts
-before publication. See [release readiness](RELEASE_READINESS.md).
+The local candidate is 0.5.0 build 45. The GitHub v0.5.0 draft still contains
+historical build-13 binaries until explicitly replaced; the production feed is
+empty. Build 45 has 378 checks plus scoped native evidence described in
+[release readiness](RELEASE_READINESS.md). Old updater and DMG evidence must not
+be treated as acceptance of current artifacts.
+
+Run `python3 scripts/prepare-source.py` after preparing the binary artifacts.
+It exports the public source tree, exact Sparkle dependency sources (including
+its vendored dependencies), source file hashes and the packaged executable hash.
+It refuses source changes during export. Keep this source archive beside the
+matching binary downloads. This does not publish the source or modify the feed.
 
 ## Isolated update fixture
 

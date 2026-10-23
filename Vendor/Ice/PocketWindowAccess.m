@@ -32,7 +32,8 @@ CGImageRef DrapletPocketCopyImage(CGWindowID windowID) {
     // Ice uses this API because ScreenCaptureKit cannot capture offscreen menu
     // extras. Look it up at runtime so removal fails open instead of preventing launch.
     typedef CGImageRef (*Capture)(CGRect, CFArrayRef, CGWindowImageOption);
-    Capture capture = (Capture)dlsym(RTLD_DEFAULT, "CGWindowListCreateImageFromArray");
+    Capture capture = (Capture)dlsym(RTLD_DEFAULT, "SLWindowListCreateImageFromArray");
+    if (!capture) capture = (Capture)dlsym(RTLD_DEFAULT, "CGWindowListCreateImageFromArray");
     if (!capture) return NULL;
     const void *value = (const void *)(uintptr_t)windowID;
     CFArrayRef array = CFArrayCreate(kCFAllocatorDefault, &value, 1, NULL);

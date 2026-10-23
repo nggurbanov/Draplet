@@ -18,6 +18,7 @@ cp Resources/Info.plist .build/Draplet.app/Contents/Info.plist
 ditto "$sparkle/Sparkle.framework" .build/Draplet.app/Contents/Frameworks/Sparkle.framework
 cp "$sparkle/LICENSE" .build/Draplet.app/Contents/Resources/Sparkle-LICENSE
 cp Vendor/Ice/LICENSE .build/Draplet.app/Contents/Resources/Ice-LICENSE
+cp Vendor/Thaw/LICENSE .build/Draplet.app/Contents/Resources/Thaw-LICENSE
 cp LICENSES/Draplet-original-MIT.txt .build/Draplet.app/Contents/Resources/Draplet-original-MIT.txt
 cp LICENSE ThirdPartyNotices.md .build/Draplet.app/Contents/Resources/
 cp Vendor/HiddenBar/LICENSE .build/Draplet.app/Contents/Resources/HiddenBar-LICENSE

@@ -2,6 +2,7 @@
 .DS_Store
 dist/
 .impeccable/review/
+__pycache__/
 
 # Local credentials and signing material
 .env
