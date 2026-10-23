@@ -1,4 +1,4 @@
-# Pocket — current user contract
+# Pocket — design contract
 
 Mode: Operate. This is an ordinary native macOS refinement. Preserve the
 incumbent `DESIGN.md` and `.impeccable/design.json`; no new world, palette, type
@@ -48,8 +48,7 @@ gesture paths are implemented; policy checks are not physical gesture acceptance
 
 ## Surface and interaction
 
-Visual authority remains the user's 2026-10-18 23.19.25 macOS emoji-picker
-reference: a much smaller downward-opening native `NSPopover` with a top pointer,
+Use the native macOS emoji picker as a surface reference: a much smaller downward-opening native `NSPopover` with a top pointer,
 translucent material, native border/shadow and a dense icon-only grid. Preserve
 native logical glyph size, Retina backing images and native monochrome tint.
 Preserve the original colors of colored status imagery. No application artwork
@@ -58,7 +57,7 @@ Names belong in tooltips/accessibility. Keep the last-good real glyph clickable
 when refresh fails; never substitute app artwork. Items with no usable image may
 show loading/unavailable state or be omitted after capture failure. Exclude
 explicit macOS Control Center `isAllowed=false` items from capture while keeping
-their pins. Live Vorssaint has this flag; do not call it universally incompatible.
+their pins. A disabled instance does not establish universal publisher incompatibility.
 
 Persist last-good native glyphs locally, bounded to 128 records. Use a soft
 120-second idle-refresh age and failure backoff of 30/120/600/3600 seconds without
@@ -78,115 +77,15 @@ suppression preserve their normal
 dismissal roles. Cold capture waits and warning states must not be represented
 as universal zero-latency or complete third-party compatibility.
 
-## Current evidence — build 38 pending
+## Drag routing and validation
 
-Current build-38 validation is pending. Build-37 motion was not accepted;
-the following 36/37 cache timings are predecessor evidence only.
+Keep same-app Pocket gestures process-local with a passive native-size image.
+Do not start a system dragging session for an internal return or change global
+Mission Control settings. Keep physical menu-bar order independent of grid order.
+Commit only on mouse release inside the current target with Command still held;
+Escape, early Command release, stale sessions and outside drops cancel. Genuine
+native status-item drags into Pocket retain their separate path.
 
-Predecessor build 37 passed **308 unit/policy checks** in
-`/tmp/Draplet-latency37-tests.log`; native build/signing passes in
-`/tmp/Draplet-latency37-build.log`. `.build/responsive37/checks.json` verifies idle
-prewarm, eight real fixture glyphs plus Shottr/Spotify, four cached opens at
-32–38 ms without recapture, failed-refresh retention and a fresh-process disk
-open at 68 ms with ten cached images and zero capture requests. The first prepared
-open took 53 ms; these are prepared-image timings, not cold capture.
-
-Its dark/light native 130 × 168-point captures and actual CUA button open/close
-passed. The matched prefix shield x=824–1197 excludes the original arrow at
-x=1197–1239 and system controls; an arrow action interrupts warming. An in-process
-display-change notification preserves ten images and working native collapse.
-It does not establish physical display-change acceptance. Current build-38 warm-pixel
-timing, bounded native backoff and final normal-launch restoration remain pending.
-
-Predecessor `.build/native-motion36-results.json` measures warm first ink at
-183/188 ms. Build-36 cached opens took 32–43 ms, while first missing-sibling
-capture still took about 4.1 seconds. Neither those timings nor the historical
-build-33 review establishes full build-38 acceptance or removes cold waits.
-
-## Historical build-33 evidence and remaining scope
-
-Build 33 passes **290 unit/policy checks** in
-`/tmp/Draplet-pocket33-tests.log`; native build/signing passes in
-`/tmp/Draplet-pocket33-build.log`. The fresh full review,
-`.build/impeccable-finish33.md`, returned **SHIP for this narrow local
-refinement**, with no material fixes. All seven historical captures and ten inspected
-motion frames are valid. Native material, typography and compact geometry agree
-with the incumbent design; no new visual tokens are needed.
-
-`.build/native-capture33/` contains collapsed pins, expanded overflow, expanded
-pins-only, dark/light Pocket, Spotlight target and pinned Spotlight captures.
-Its five focused checks pass stable placement, four interrupted-reveal
-cancellations, actual native overflow replacement, eight real 15.5 × 33-point
-glyphs and the actual Spotlight target/magnifier. The grid is 130 × 168 points.
-Vorssaint appeared as a warning in that build; current inventory honors its
-explicit Control Center disallowance.
-
-Cold **placement** is separately verified without recording in
-`.build/native-capture33/cold-no-recorder.json`: first-published x=989 stays
-stable. Whole native preparation plus reveal took about **1.60 seconds cold**
-and **0.75 seconds warm**. Bounded waits require pin visibility to converge before
-accepting final geometry and preserve fail-open behavior.
-
-Actual pixel motion in `.build/native-motion33-results.json` covers **two warm
-recorded reveals**. Their 25 and 27 preparation frames contain no early glyph
-ink, and each has five distinct partial reveal levels. Shared curtain masking
-and occupied-region progress preserve the selected Quick 180/160 ms animation.
-These recordings do not establish cold pixel motion or zero preparation latency.
-
-The broader predecessor `.build/native-qa-build28/results.json` completed
-**seven of fourteen scenarios**, including four independent first-frame
-placements, forty direct reversals, forty actual arrow actions and five-second
-departure auto-hide. No complete current fourteen-scenario pass is claimed.
-Focused `.build/spotlight25/results.json` establishes actual source/target,
-native hiding/magnifier capture and return within that predecessor's scope;
-physical held-Command acceptance remains unverified. Its initial cold image load
-took 6.72 seconds.
-
-Build-32 actual CUA Show → popover → Hide clicks are recorded in
-`.build/native-capture32/actual-click-states.json`; the relevant hierarchy and
-open/close path are unchanged in 33. The explicit capture hold requires both
-`--test-controls` and `--qa-hold-pocket`. Such appearance captures do not prove
-default dismissal or auto-hide. Normal popovers remain transient; system
-presentation still cancels the held QA surface.
-
-`.build/native-restoration33.json` records normal installed 0.5.0 (33), no test
-flags, matching installed/built executable hashes and verified signing. Both real
-pins are preserved; only Sparkle's last-check timestamp changed. The fixture
-was unregistered and retired, with no QA helpers left running. Cleanup restored
-the same installed successor, without rolling back to build 15.
-
-The historical build-21 20.23-second Cached idle sample measured 0.49% of one
-core and 75.3–75.7 MiB RSS; `sample` reported 14.8M physical footprint. These are
-different measurements and are not current profiling, energy acceptance or
-long-term leak proof.
-
-Physical Command-drag in either direction remains unverified: CUA rejects a pure
-held Command key. Fresh Mission Control and Fladder/Minecraft, full
-keyboard/VoiceOver, Intel, macOS 14.2–26, multiple physical displays, GPU and
-battery acceptance remain outside this pass. The virtual Sill display must not
-supply physical glyph evidence. Current successor DMG/updater and public
-binary/feed publication are not claimed. See `docs/RELEASE_READINESS.md` for
-evidence and limits.
-
-## Command drag refinement — build 40
-
-Pocket cells support Command-only local rearrangement with a before/after
-insertion marker and persistent native-item keys. Automatic overflow may be
-reordered; menu-bar return remains the explicit-pin path. Keep app-group pinning
-and the physical bar's native order independent of this grid order. The actual
-control owns mouseDown/mouseDragged/mouseUp; ordinary clicks remain native actions.
-After unmasking, Pocket's small control owns input above transparent status-window
-overlays such as Crisp's level26 window. It remains beneath the shared curtain
-while masked. No palette, spacing, material or original-arrow redesign.
-327 automated checks pass; current physical Command-drag acceptance is pending.
-
-## Local drag routing — build 41
-
-Keep same-app Pocket gestures local, with a passive native-size image following
-the cursor. Starting a system NSDraggingSession for a same-app return exposes
-the top-edge path to Mission Control; do not change global system settings to
-work around it. Commit only on Command-release inside the exact current target;
-Escape, release of Command, window destruction and outside drops cancel. Native
-status-item drags into Pocket retain their distinct existing implementation.
-Build 40's physical start was user-confirmed, with Mission Control interrupting
-return. Build 41 passes 333 checks; physical return acceptance remains pending.
+Current behavior and reproducible QA are documented in docs/POCKET.md.
+Release evidence and unresolved hardware limits are in docs/RELEASE_READINESS.md.
+Do not interpret implemented gesture guards as hardware acceptance.

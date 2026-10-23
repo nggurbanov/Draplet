@@ -2,7 +2,7 @@
 
 Draplet draws over the menu bar, observes other applications through Accessibility and, when required, reconstructs the menu-bar background. Resource costs depend on the foreground app, wallpaper, menu state and system memory pressure.
 
-## What build 13 changes
+## Resource strategy
 
 - Use one shared 20 Hz tick for system-presentation detection and left-side pointer/menu checks instead of two independent fast timers. Animation timers still run at 60 Hz only during transitions.
 - Share typed window observations. Discover visible window IDs at the existing 20 Hz presentation cadence; describe all windows only when IDs change, when background shadow geometry is needed or after a 250 ms fallback. Known Dock and game canvases still receive targeted 20 Hz geometry/alpha checks, including fades with unchanged IDs.
@@ -28,9 +28,9 @@ For an A/B comparison, use the same Mac, foreground app, wallpaper, Settings vis
 
 ## Validation scope
 
-168 checks cover shared observations and same-ID Dock fades, immediate app changes, cache invalidation, stale capture deliveries, exact background medians, stationary indicator repaint requests, Settings release/recreation and preserved menu/fullscreen behavior. A captured WindowServer-rounded frame triggers the repaint regression before the fix.
+The regression suite covers shared observations and same-ID Dock fades, immediate app changes, cache invalidation, stale capture deliveries, exact background medians, stationary indicator repaint requests, Settings release/recreation and preserved menu/fullscreen behavior. A captured WindowServer-rounded frame triggers the repaint regression before the fix.
 
-Hardware measurements and native acceptance results are recorded in the release-readiness document. No claim of zero GPU use, absence of long-term leaks, or universal battery improvement is made.
+Historical measurements are scoped below; current release validation and its limits are in [RELEASE_READINESS.md](RELEASE_READINESS.md). No claim of zero GPU use, absence of long-term leaks, or universal battery improvement is made.
 
 ## Local measurements (2026-10-18)
 

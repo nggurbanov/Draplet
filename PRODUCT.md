@@ -35,7 +35,7 @@ bar removes the pin and restores the original section subject to available space
 Ordinary clicks invoke the actual native action. Physical Command-drag acceptance
 remains separate from implemented gesture guards and automated policy checks.
 
-The user's macOS emoji-picker reference governs this surface: a much smaller
+The native macOS emoji picker is the surface reference: a much smaller
 downward-opening native popover with a top pointer, translucent material and a
 dense glyph grid. Keep native logical image size, native monochrome tint and
 original colors for colored imagery. Application artwork is not a substitute.
@@ -62,10 +62,10 @@ GNU GPL v3 remain approved. See .impeccable/pocket-brief.md and
 docs/RELEASE_READINESS.md for current evidence and its limits.
 
 ## Brand commitments
-Draplet variant E: asymmetric terracotta curtain on the left, two ivory rings on a chocolate rail and three exposed chocolate dots. Production artwork lives under Resources/Brand and Resources/Installer. Settings concepts establish warm ivory/charcoal surfaces, restrained terracotta accents, native controls and compact navigation. User explicitly clarified that their exact layout is not binding; choose the best actual UI/UX patterns using Impeccable.
+Draplet variant E: asymmetric terracotta curtain on the left, two ivory rings on a chocolate rail and three exposed chocolate dots. Production artwork lives under Resources/Brand and Resources/Installer. Settings concepts establish warm ivory/charcoal surfaces, restrained terracotta accents, native controls and compact navigation. Settings artwork is a style reference; choose native macOS interaction patterns rather than copying an image literally.
 
 ## Delivery
-Implement native Settings and production icon; prepare and verify a local drag-to-Applications DMG. Public source publication to nggurbanov/Draplet is authorized. Paid signing and notarization are not authorized. In-app updates are approved with a single feed, automatic checks and persistent install reminders; no channels. Keep the current app signing identity and bundle identifier for existing permissions.
+Public alpha releases are distributed through nggurbanov/Draplet with a drag-to-Applications DMG and matching GPL source. Alpha downloads are ad-hoc signed, not Developer ID signed or notarized. Updates use one feed, automatic checks and persistent reminders; verified downloads install on normal quit or an explicit Update and Relaunch action. Keep the bundle identifier stable and validate any signing-identity transition separately.
 
 ## Product principles
 - A quiet everyday utility; Settings should make each task obvious.
@@ -74,4 +74,4 @@ Implement native Settings and production icon; prepare and verify a local drag-t
 - Brand texture belongs in artwork; controls use familiar macOS conventions.
 
 ## Open decisions
-No final preferred pace was selected. Retain the user's current choice and both available timings.
+Both animation paces remain available. Preserve the saved choice rather than imposing a new default.
