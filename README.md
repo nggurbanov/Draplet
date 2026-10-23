@@ -9,6 +9,9 @@ then reveal them with a click, a hover, or a keyboard shortcut.
 **Early alpha.** Draplet is changing quickly. The current version is 0.5.0.
 Alpha downloads are not Developer ID signed or notarized.
 
+[Download 0.5.0 Alpha](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.0)
+(Apple silicon).
+
 ## Features
 
 - Hide File, Edit, View and other application menus behind a left-side curtain.
