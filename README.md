@@ -3,6 +3,7 @@
 ![Schematic demonstration of Draplet revealing both sides of the menu bar and Command-dragging a status icon into Pocket and back](docs/assets/draplet-demo.gif)
 
 *Schematic demonstration with fictional content; no screen recording.*
+
 [MP4 version](docs/assets/draplet-demo.mp4) · [Animation source and export instructions](media/demo)
 
 <img src="Resources/Brand/Draplet.png" width="96" alt="Draplet app icon">
