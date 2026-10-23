@@ -40,6 +40,10 @@ Alpha downloads are not Developer ID signed or notarized.
 - Native Settings with light and dark appearances. A Dock icon appears while Settings is open.
 - Signed in-app updates: automatic checks, background downloads and installation on quit.
 
+## Settings
+
+![Draplet Appearance settings in dark mode](docs/assets/settings-appearance.png)
+
 ## Requirements and current limits
 
 - macOS 14.2 or later. The current development build is tested on macOS 27 with Apple silicon;
