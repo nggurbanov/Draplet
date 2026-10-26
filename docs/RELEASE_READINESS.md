@@ -1,11 +1,37 @@
-# Alpha release validation — 0.5.1 build 46
+# Alpha release validation — 0.5.2 build 47
+
+[0.5.2 Alpha](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.2) uses the
+persistent self-signed Alpha identity. Its application source is tagged at
+`4b25349f335109e7d5aa14b20d1884bf80c02679`; publication metadata follows on main.
+Validation was performed on macOS 27 / Apple silicon with one physical display.
+
+| Check | Result |
+| --- | --- |
+| Lifecycle, preferences, rendering and animation suite | 380 checks passed |
+| Real-signature release policy | 15 cases passed, including legacy gating, later-release notices and unlaunchable runtime rejection |
+| Published build-45 and build-46 migration gating | Review required with automatic downloads enabled; no staging or replacement on ordinary quit |
+| Independent privacy baseline | A fresh LaunchServices app had Accessibility and Screen Recording both denied |
+| Authorized real Sparkle update | Build 100 → 101 on ordinary quit; stayed closed; new LaunchServices process retained both grants and preferences |
+| Test permission cleanup | Only the test app's entries removed; a fresh process confirmed both grants denied again |
+| Old public updater → persistent Alpha signer | Public 0.5.1 code showed the actual migration notes and accepted download / Install and Relaunch; preferences preserved |
+| Packaged executable | Its machine-code section matched both tested successors |
+| Release integrity | Mounted DMG, symlink-preserving ZIP, original Ed25519 key, 123 corresponding-source hashes and executable hash verified |
+
+The signing transition from old ad-hoc builds can require one-time authorization;
+this release does not claim to transfer their hash-bound grants transparently.
+Compatible Alpha-to-Alpha grant preservation was verified on this Mac. This is
+not validation of older macOS versions, Intel or every third-party menu item.
+The native hiding implementation is unchanged from build 46; broader native
+acceptance remains the build-45 baseline described below.
+
+## Previous release: 0.5.1 build 46
 
 **Rollout paused on October 26:** the ad-hoc public update invalidated macOS
 Accessibility grants on an existing installation. The missing left arrow and
 right-arrow Settings fallback were consequences of that permission loss.
 Restoring the installation's previous certificate identity on the same 0.5.1
 code restored Accessibility, Screen Recording and both controls without new
-grants. The feed has been returned to build 45. See
+grants. The feed was returned to build 45 pending the 0.5.2 migration. See
 [permission recovery](UPDATES.md#permission-recovery-after-051).
 
 The installer fixtures below verified replacement and application preferences,
@@ -22,11 +48,10 @@ incompatibility check. Isolated copies of the published
 build-45 and build-46 code both required interactive review with automatic
 downloads enabled; neither staged the migration or replaced itself on ordinary
 exit, and fixture preferences survived. These checks verify rollout gating,
-not TCC grant preservation. A persistent self-signed Alpha candidate is now
-prepared; an independent authorized N→N+1 acceptance run is still required
-before resuming publication. Shell-child permission probes inherited the host's
-grants and were rejected as acceptance evidence; a LaunchServices launch of the
-fresh fixture correctly returned both permissions false.
+not TCC grant preservation. Independent authorized acceptance for build 47 is
+reported above. Shell-child permission probes inherited the host's grants and
+were rejected as acceptance evidence; a LaunchServices launch of the fresh
+fixture correctly returned both permissions false.
 
 [0.5.1 Alpha](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.1) fixes the
 Pocket disclosure overlapping native system status items such as Sound/AirPods.
@@ -98,6 +123,7 @@ actions are checked separately.
 ```sh
 bash test.sh
 DRAPLET_SIGNING_IDENTITY='<stable certificate>' \
+DRAPLET_SIGNING_PROFILE=alpha \
 DRAPLET_PREVIOUS_RELEASE_APP='/path/to/previous-public/Draplet.app' \
   bash scripts/prepare-release.sh
 ```
@@ -146,8 +172,8 @@ same installed successor after either success or failure.
 - Long-running animated wallpapers/icons, GPU/WindowServer attribution, battery
   and long-term memory stability have not been quantified for this release.
   Historical resource comparisons in PERFORMANCE.md are not current benchmarks.
-- Alpha builds are ad-hoc signed, not Developer ID signed or notarized. First
-  launch may require Open Anyway. Test any later signing-identity transition
+- Version 0.5.2 has a persistent self-signed Alpha identity, not Developer ID
+  signing or notarization. First launch may require Open Anyway. Test a later signing-identity transition
   separately because macOS can require granting permissions again.
 
 ## Release integrity

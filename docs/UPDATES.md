@@ -24,8 +24,9 @@ distribution. Ed25519 archive signatures do not preserve TCC permissions.
 
 ## Permission recovery after 0.5.1
 
-The 0.5.1 automatic rollout is paused; the feed temporarily advertises 0.5.0.
-Installed 0.5.1 copies are not downgraded. The release remains available manually.
+The 0.5.1 automatic rollout was paused and the feed temporarily returned to
+0.5.0. Version 0.5.2 now offers an explicit signing migration. Older clients
+must review the permission-recovery instructions before choosing installation.
 
 If the right arrow opens Settings and the left arrow is absent, check the
 Accessibility setup message. Open System Settings → Privacy & Security →
@@ -34,6 +35,8 @@ entry stays enabled but no longer applies, remove that entry and add the current
 app again. Also check Screen & System Audio Recording for background matching
 and Pocket capture, then quit and reopen Draplet if macOS requests it. Draplet
 captures no audio. App preferences and pins do not need resetting.
+On macOS 27 the Accessibility privacy panel is labelled **Device Control and
+Data Access**; Draplet's Grant Access action opens the appropriate panel.
 
 Future automatic updates must retain a compatible certificate-based designated
 requirement. Test an authorized previous app updating to the candidate; the
@@ -56,13 +59,12 @@ Each release must keep a `data-permission-migration` notice explaining both
 permissions and their recovery, so clients skipping the first migration still
 see the warning. This does not block users from choosing the upgrade.
 See [Sparkle major upgrades](https://sparkle-project.org/documentation/publishing/#major-upgrades).
-The source identifies the unpublished 0.5.2/build-47 candidate. No
-certificate-signed public successor is published yet.
+The first certificate-signed public successor is 0.5.2/build 47.
 
-## Persistent Alpha signing candidate
+## Persistent Alpha signing
 
-An experimental self-signed `Draplet Alpha Distribution` identity is prepared
-for the next Alpha because Developer ID is not currently available. Its private
+Version 0.5.2 uses a persistent self-signed `Draplet Alpha Distribution` identity
+because Developer ID is not currently available. Its private
 key is in the signing machine's Keychain, with an encrypted backup outside the
 repository. Reuse it across releases; do not generate a new identity per build.
 No customer certificate installation or trust-setting changes are required
@@ -77,7 +79,8 @@ certificate has no Apple Team ID: enabling hardened runtime would reject the
 bundled Sparkle framework, so the release gate rejects that combination.
 The default `apple` profile retains hardened runtime for Apple Development
 and Developer ID identities. Never change system trust settings to make a
-release pass. Public rollout remains paused until independent privacy acceptance.
+release pass. Independent LaunchServices privacy acceptance passed before
+activating the 0.5.2 feed; see [release validation](RELEASE_READINESS.md).
 
 ## Prepare a release
 
@@ -122,14 +125,15 @@ on this feed; key rotation requires a separately tested migration.
 
 ## Current acceptance boundary
 
-The current public alpha is [0.5.1 build 46](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.1),
-from source commit `5f76f076b784bc68e30cf329b6013ed9eacf24bb`.
+The current public alpha is [0.5.2 build 47](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.2),
+from source commit `4b25349f335109e7d5aa14b20d1884bf80c02679`.
 The tag identifies the application source; subsequent main-branch commits publish
 release metadata and the feed. DMG, updater ZIP, complete source snapshot and
-SHA-256 checksums accompany the release. Its automatic rollout was paused after
-the permission-identity regression; the feed currently advertises build 45.
-Build 46 has 380 checks and current installer, signature and packaging evidence
-described in [release readiness](RELEASE_READINESS.md). The first public alpha,
+SHA-256 checksums accompany the release. The feed advertises build 47 with a
+permanent automatic-update floor of 47: earlier builds require review.
+Build 47 has 380 core checks, 15 signing-policy cases, a real authorized update
+and a reviewed public-code-to-Alpha migration described in
+[release readiness](RELEASE_READINESS.md). The first public alpha,
 0.5.0 build 45, remains the broader native-test baseline. Older build-13/15 draft
 results are historical and do not describe the published binaries.
 
@@ -191,6 +195,15 @@ fixture preferences survive. These copies use public application code with
 isolated test identifiers and version metadata; they still do not test privacy
 grants. Prepare and run cases sequentially because `/migration` points to the
 most recently prepared feed.
+
+To exercise the actual old-to-new signature transition, set
+`DRAPLET_TEST_BASE_SIGNING_IDENTITY=-` for the old ad-hoc app,
+`DRAPLET_TEST_RELEASE_APP` to the unpacked candidate and
+`DRAPLET_TEST_SIGNING_IDENTITY` to its persistent certificate. Use the matching
+signing profile and `DRAPLET_TEST_RELEASE_NOTES=updates/<version>.html`.
+The migration must remain pending until Review Update is chosen; verify the
+warning in Sparkle, then choose Install Update and Install and Relaunch. Confirm
+that the successor has the new certificate and retains fixture preferences.
 
 `scripts/qa-release-signing.py` checks the release gate against real certificate
 and ad-hoc signatures. Supply `--candidate`, `--compatible-previous`,

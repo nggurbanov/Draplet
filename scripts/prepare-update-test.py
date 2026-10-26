@@ -4,6 +4,7 @@ import pathlib
 import plistlib
 import subprocess
 import os
+import shutil
 import sys
 import xml.etree.ElementTree as ET
 ET.register_namespace("sparkle", "http://www.andymatuschak.org/xml-namespaces/sparkle")
@@ -27,6 +28,8 @@ for kind in ('installed', 'release'):
 for kind, build in [('installed', '100'), ('release', '101')]:
     app = base / kind / 'Draplet Update Test.app'
     source_app = pathlib.Path(os.environ.get('DRAPLET_TEST_BASE_APP', str(root / '.build/Draplet.app')))
+    if kind == 'release':
+        source_app = pathlib.Path(os.environ.get('DRAPLET_TEST_RELEASE_APP', str(source_app)))
     subprocess.run(['ditto', str(source_app), str(app)], check=True)
     info = app / 'Contents/Info.plist'
     data = plistlib.loads(info.read_bytes())
@@ -40,7 +43,10 @@ for kind, build in [('installed', '100'), ('release', '101')]:
     if report := os.environ.get('DRAPLET_TEST_PRIVACY_REPORT'):
         data['DrapletPrivacyTestReport'] = str(pathlib.Path(report).resolve())
     info.write_bytes(plistlib.dumps(data))
-    subprocess.run(['bash', str(root / 'scripts/sign-app.sh'), str(app), os.environ.get('DRAPLET_TEST_SIGNING_IDENTITY', '-')], check=True)
+    identity = os.environ.get('DRAPLET_TEST_SIGNING_IDENTITY', '-')
+    if kind == 'installed':
+        identity = os.environ.get('DRAPLET_TEST_BASE_SIGNING_IDENTITY', identity)
+    subprocess.run(['bash', str(root / 'scripts/sign-app.sh'), str(app), identity], check=True)
 archive_dir = base / 'feed'
 archive_dir.mkdir(exist_ok=True)
 subprocess.run(['ditto', '-c', '-k', '--sequesterRsrc', '--keepParent',
@@ -50,6 +56,9 @@ appcast_args = [str(root / '.build/dependencies/sparkle-2.10.0/bin/generate_appc
                 '--account', 'DrapletUpdates', '--download-url-prefix', 'http://127.0.0.1:18734/' + scenario + '/',
                 '--maximum-deltas', '0']
 appcast_args += ['--major-version', '101'] if scenario == 'migration' else ['--critical-update-version', '']
+if notes := os.environ.get('DRAPLET_TEST_RELEASE_NOTES'):
+    shutil.copyfile(notes, archive_dir / 'Draplet-0.5.1.html')
+    appcast_args += ['--embed-release-notes']
 subprocess.run([*appcast_args, str(archive_dir)], check=True)
 if scenario == 'bad-signature':
     archive = archive_dir / 'Draplet-0.5.1.zip'
