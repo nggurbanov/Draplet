@@ -17,7 +17,7 @@ trap 'rm -rf "$staging"' EXIT
 cp "dist/$archive" "$staging/"
 if [ -f "updates/$version.html" ]; then cp "updates/$version.html" "$staging/Draplet-$version.html"; fi
 "$sparkle/bin/generate_appcast" --account DrapletUpdates --maximum-deltas 0 \
-  --critical-update-version '' --embed-release-notes \
+  --embed-release-notes \
   --link https://github.com/nggurbanov/Draplet \
   --download-url-prefix "https://github.com/nggurbanov/Draplet/releases/download/v$version/" "$staging"
 cp "$staging/appcast.xml" "dist/appcast-$version.xml"

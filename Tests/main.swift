@@ -694,6 +694,25 @@ check(NativeMenuTrackingPolicy.isTracking([popup(11,22)],ownPID:10,pocketWindow:
 let notchRight = CGRect(x: 824, y: 0, width: 646, height: 80)
 let nativeOverflowSlot = CGRect(x:830,y:0,width:20,height:33)
 let revealedSlots = [CGRect(x:1000,y:0,width:34,height:33),CGRect(x:1200,y:0,width:42,height:33)]
+// Replayed physical layout: MenuBarAgent owns Sound (AirPods) itself, while
+// third-party extras are reached through the same broker-owned wrappers.
+let airPodsSlot = CGRect(x:1093.5,y:0,width:22,height:33)
+let airPodsHostSlots: [(owner:pid_t,role:String,frame:CGRect)] = [
+    (42,kAXMenuBarItemRole,airPodsSlot),
+    (777,kAXButtonRole,CGRect(x:1123.5,y:0,width:34,height:33)),
+    (778,kAXButtonRole,CGRect(x:1157.5,y:0,width:40,height:33))
+]
+let occupiedAirPodsSlots = airPodsHostSlots.filter {
+    PocketInventory.isHostedLeaf(owner:$0.owner,broker:42,role:$0.role)
+}.map(\.frame)
+let airPodsDisclosure = PocketGeometry.overflowButtonFrame(expanded:true,native:nil,
+    slots:occupiedAirPodsSlots,area:notchRight,height:33)
+check(airPodsDisclosure?.maxX == airPodsSlot.minX,
+      "A broker-owned AirPods/Sound slot stays occupied when placing the leading Pocket button")
+check(!PocketInventory.isHostedLeaf(owner:42,broker:42,role:kAXButtonRole)
+      && !PocketInventory.isHostedLeaf(owner:42,broker:42,role:kAXGroupRole)
+      && !PocketInventory.isHostedLeaf(owner:777,broker:42,role:kAXApplicationRole),
+      "Broker overflow buttons, wrappers and parked applications are not rendered status-item leaves")
 check(PocketGeometry.overflowButtonFrame(expanded:false,native:nativeOverflowSlot,slots:revealedSlots,area:notchRight,height:33) == nil,
       "The Pocket chevron stays hidden when the right strip is collapsed, even with native overflow")
 check(PocketGeometry.overflowButtonFrame(expanded:false,native:nil,slots:revealedSlots,area:notchRight,height:33) == nil,

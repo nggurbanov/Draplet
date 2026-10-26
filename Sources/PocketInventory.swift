@@ -105,6 +105,11 @@ enum PocketInventory {
                 < $1.items.count * 2 + ($1.overflow == nil ? 0 : 1)
         }
     }
+    static func isHostedLeaf(owner: pid_t, broker: pid_t, role: String?) -> Bool {
+        // Sound/AirPods and other system extras are real menu-bar items owned
+        // by the broker itself. Only its buttons/wrappers belong to the host.
+        role == kAXMenuBarItemRole || (owner != broker && role == kAXButtonRole)
+    }
     // Adapted from Thaw's MenuBarAgentWindow.swift / AXPrimitives.swift,
     // Copyright (Thaw) 2026 Toni Förster, GPL-3.0. See Vendor/Thaw/ORIGIN.md.
     static func hostSnapshot(on display: CGRect = CGDisplayBounds(CGMainDisplayID())) -> HostSnapshot? {
@@ -131,10 +136,9 @@ enum PocketInventory {
                 for _ in 0..<8 {
                     var owner: pid_t = 0
                     guard AXUIElementGetPid(leaf, &owner) == .success else { break }
-                    if owner != pid {
-                        let role = attribute(leaf,kAXRoleAttribute) as? String
+                    let role = attribute(leaf,kAXRoleAttribute) as? String
+                    if isHostedLeaf(owner:owner,broker:pid,role:role) {
                         // A parked AXApplication is identity metadata, not ink.
-                        guard role == kAXButtonRole || role == kAXMenuBarItemRole else { break }
                         var entry = HostedItem(owner:owner,element:leaf,frame:bounds)
                         if owner == getpid() { entry.identifier = attribute(leaf,kAXIdentifierAttribute) as? String }
                         if owner != getpid() {
@@ -142,6 +146,7 @@ enum PocketInventory {
                         }
                         result.append(entry); break
                     }
+                    guard owner == pid else { break }
                     guard let next = (attribute(leaf, kAXChildrenAttribute) as? [AXUIElement])?.first else { break }
                     leaf = next; AXUIElementSetMessagingTimeout(leaf, 0.1)
                 }
