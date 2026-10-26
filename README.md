@@ -10,10 +10,10 @@ A free, open-source macOS utility that keeps both sides of your menu bar tidy.
 Hide application menus on the left and selected status icons on the right,
 then reveal them with a click, a hover, or a keyboard shortcut.
 
-**Early alpha.** Draplet is changing quickly. The current version is 0.5.0.
+**Early alpha.** Draplet is changing quickly. The current version is 0.5.1.
 Alpha downloads are not Developer ID signed or notarized.
 
-[Download 0.5.0 Alpha](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.0)
+[Download 0.5.1 Alpha](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.1)
 (Apple silicon).
 
 
@@ -120,11 +120,11 @@ Do not disable Gatekeeper or other system protections globally.
 bash test.sh
 ```
 
-The 0.5.0 build-45 candidate passes 378 lifecycle, policy, rendering and
-animation checks. The local native harness passes 17 scenarios, including rapid
-reversals, actual arrow input, Pocket caching, fullscreen suppression and desktop
-restoration. A separate two-publisher regression verifies 12 menu activations
-without clicks reaching a foreign transparent blocker.
+The 0.5.1 build-46 patch passes 380 lifecycle, policy, rendering and animation
+checks, including the AirPods/Pocket overlap regression. Real isolated updates
+passed install-on-quit, Update and Relaunch, settings preservation and failure
+rejection. The build-45 baseline also passed 17 native scenarios and 12 separate
+publisher menu activations; those broader suites were not rerun for this patch.
 
 These are local alpha checks on macOS 27 / Apple silicon. Physical Command-drag,
 arbitrary publisher popovers, older macOS, Intel and multiple displays still need

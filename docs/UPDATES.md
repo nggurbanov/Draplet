@@ -49,14 +49,15 @@ on this feed; key rotation requires a separately tested migration.
 
 ## Current acceptance boundary
 
-The first public alpha is [0.5.0 build 45](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.0),
-from source commit `0033828dc0a9f432bb749f89b33956220515c36b`.
+The current public alpha is [0.5.1 build 46](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.1),
+from source commit `5f76f076b784bc68e30cf329b6013ed9eacf24bb`.
 The tag identifies the application source; subsequent main-branch commits publish
 release metadata and the feed. DMG, updater ZIP, complete source snapshot and
 SHA-256 checksums accompany the release. The feed advertises the same signed ZIP.
-Build 45 has 378 checks plus scoped native and current installer evidence described
-in [release readiness](RELEASE_READINESS.md). Older build-13/15 draft results are
-historical and do not describe the published binaries.
+Build 46 has 380 checks and current installer, signature and packaging evidence
+described in [release readiness](RELEASE_READINESS.md). The first public alpha,
+0.5.0 build 45, remains the broader native-test baseline. Older build-13/15 draft
+results are historical and do not describe the published binaries.
 
 Run `python3 scripts/prepare-source.py` after preparing the binary artifacts.
 It exports the public source tree, exact Sparkle dependency sources (including

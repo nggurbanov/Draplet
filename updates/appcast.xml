@@ -3,28 +3,22 @@
     <channel>
         <title>Draplet</title>
         <item>
-            <title>0.5.0</title>
-            <pubDate>Fri, 23 Oct 2026 06:51:55 +0300</pubDate>
+            <title>0.5.1</title>
+            <pubDate>Mon, 26 Oct 2026 14:49:30 +0300</pubDate>
             <link>https://github.com/nggurbanov/Draplet</link>
-            <sparkle:criticalUpdate/>
-            <sparkle:version>45</sparkle:version>
-            <sparkle:shortVersionString>0.5.0</sparkle:shortVersionString>
+            <sparkle:version>46</sparkle:version>
+            <sparkle:shortVersionString>0.5.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.2</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description><![CDATA[<h2>Draplet 0.5.0 Alpha</h2>
+            <description><![CDATA[<h2>Draplet 0.5.1 Alpha</h2>
 <ul>
-<li>Hide and reveal both sides of the menu bar, with matching indicators and independent click/hover behavior.</li>
-<li>Curtain and Fade animations, plus Hidden Bar mode on the right.</li>
-<li>A compact Pocket for overflow and pinned status icons. Hold Command to drag; ordinary clicks open menus.</li>
-<li>Cached or Live background matching, native light/dark Settings and configurable shortcuts.</li>
-<li>Automatic signed updates: download in the background, install on quit, or Update and Relaunch.</li>
-<li>Fullscreen and Mission Control suppression, safer native input routing and last-good icon caching.</li>
+<li>Fixed the Pocket arrow covering or clipping the AirPods sound icon in the menu bar.</li>
+<li>Pocket now accounts for native system status icons when placing its arrow.</li>
 </ul>
-<p>Early alpha, build 45. Current hardware validation: Apple silicon, macOS 27. The arm64 app targets macOS 14.2; older systems and multiple displays still need validation.</p>
-<p>Not Developer ID signed or notarized. Initial launch may require Open Anyway in macOS Privacy &amp; Security. Do not disable Gatekeeper globally.</p>
-<p>Some returned extras use a compatibility slot with a cached real glyph; changing artwork needs Refresh Icons. Arbitrary custom publisher panels and physical Command-drag need broader testing.</p>
+<p>Small bug-fix release, build 46. Your settings and pinned apps are preserved.</p>
+<p>Apple silicon, macOS 14.2+. Alpha signing and compatibility limits remain unchanged.</p>
 ]]></description>
-            <enclosure url="https://github.com/nggurbanov/Draplet/releases/download/v0.5.0/Draplet-0.5.0.zip" length="3995889" type="application/octet-stream" sparkle:edSignature="ANSwP0aB3qzye90aDndaJOQ7fAe887rIPQoC1Wj5WGffQmi5jIN5nXOtpaiEQbYLG5ehcj+YfKbZjd8fpw8IBQ=="/>
+            <enclosure url="https://github.com/nggurbanov/Draplet/releases/download/v0.5.1/Draplet-0.5.1.zip" length="3996042" type="application/octet-stream" sparkle:edSignature="55gIuHbspfSxZEXON/wuEskzLsUGwxG3tDUUGYqAowhckTm0uvnmFCb/tUxCmpXVhFxNEiFZXfLNzCO9rOLjBg=="/>
         </item>
     </channel>
 </rss>

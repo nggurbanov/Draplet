@@ -1,4 +1,28 @@
-# Alpha release validation — 0.5.0 build 45
+# Alpha release validation — 0.5.1 build 46
+
+[0.5.1 Alpha](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.1) fixes the
+Pocket disclosure overlapping native system status items such as Sound/AirPods.
+Its source tag identifies commit `5f76f076b784bc68e30cf329b6013ed9eacf24bb`.
+Validation was performed on macOS 27 / Apple silicon with one physical display.
+
+| Patch check | Result |
+| --- | --- |
+| Lifecycle, preferences, rendering and animation suite | 380 checks passed |
+| AirPods occupancy regression | Failed before the fix, passed after it |
+| Live AirPods rendering and placement | Geometry, screenshots and three collapse/expand cycles passed on October 25, before the version bump |
+| Release DMG | Checksum, mounted app signature, executable equality and Applications link passed |
+| Update ZIP and corresponding source | Symlinks, source hashes, source commit and packaged executable hash matched |
+| Update signature | Original Ed25519 key verified; modified bytes rejected |
+| Real isolated install-on-quit | Build 100 → 101; preferences preserved; application remained closed |
+| Real isolated Update and Relaunch | Build 100 → 101; preferences preserved; new normal process launched |
+| Corrupted update / unavailable feed | Errors reported; installed fixture remained build 100 |
+| Public artifacts | All five downloads matched local SHA-256 values |
+
+This patch does not claim a new run of the broader build-45 native suites below.
+Signing, supported architectures and known alpha limits remain unchanged. The
+feed advertises build 46 only after the public update ZIP was verified.
+
+## Previous release: 0.5.0 build 45
 
 [0.5.0 Alpha](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.0) is the
 first public binary release. Its application source is tagged at
