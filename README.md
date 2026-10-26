@@ -13,6 +13,11 @@ then reveal them with a click, a hover, or a keyboard shortcut.
 **Early alpha.** Draplet is changing quickly. The current version is 0.5.1.
 Alpha downloads are not Developer ID signed or notarized.
 
+**0.5.1 permission issue:** its automatic rollout is paused. After an ad-hoc
+update, macOS can require granting Accessibility and Screen Recording again.
+If the right arrow opens Settings and the left arrow is missing, see
+[permission recovery](docs/UPDATES.md#permission-recovery-after-051).
+
 [Download 0.5.1 Alpha](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.1)
 (Apple silicon).
 

@@ -16,14 +16,39 @@ updates remain scheduled for exit.
 Archives are Ed25519-signed and verified before extraction. This signature protects
 updates; it does not replace Developer ID/notarization or remove initial Gatekeeper
 approval for alpha downloads. Public alpha builds are ad-hoc signed. Local development
-builds may use an Apple Development identity. Changing that identity can require
-re-granting macOS permissions; test the beta signing transition separately.
+builds may use an Apple Development identity. Ad-hoc identity is tied to the
+binary hash, so an update can invalidate existing macOS privacy grants even
+when the bundle identifier stays the same. Automatic releases now require an
+explicit stable signing certificate; use Developer ID Application for public
+distribution. Ed25519 archive signatures do not preserve TCC permissions.
+
+## Permission recovery after 0.5.1
+
+The 0.5.1 automatic rollout is paused; the feed temporarily advertises 0.5.0.
+Installed 0.5.1 copies are not downgraded. The release remains available manually.
+
+If the right arrow opens Settings and the left arrow is absent, check the
+Accessibility setup message. Open System Settings → Privacy & Security →
+Accessibility and authorize the current `/Applications/Draplet.app`. If an old
+entry stays enabled but no longer applies, remove that entry and add the current
+app again. Also check Screen & System Audio Recording for background matching
+and Pocket capture, then quit and reopen Draplet if macOS requests it. Draplet
+captures no audio. App preferences and pins do not need resetting.
+
+Future automatic updates must retain a compatible certificate-based designated
+requirement. Test an authorized previous app updating to the candidate; the
+isolated installer fixture deliberately has no privacy grants and cannot verify
+their preservation. A signing-identity migration needs a separate acceptance test.
 
 ## Prepare a release
 
 1. Increase both version and monotonically increasing `CFBundleVersion` in
    `Resources/Info.plist`. Add `updates/<version>.html` release notes.
-2. Run `bash test.sh` and `bash scripts/prepare-release.sh` on macOS.
+2. Run `bash test.sh`, then set `DRAPLET_SIGNING_IDENTITY` to an explicit stable
+   signing certificate and run `bash scripts/prepare-release.sh` on macOS.
+   Ad-hoc, unset and automatic identity selection are rejected. Set
+   `DRAPLET_PREVIOUS_RELEASE_APP` to the previous authorized app to check mutual
+   requirement compatibility; also verify its real permissions after updating.
    It creates a DMG, symlink-preserving updater ZIP, SHA-256 file and candidate appcast
    and corresponding-source archive in ignored `dist/`. It does not upload or publish anything.
 3. Verify the actual N→N+1 update, failure paths, mounted DMG and current app behavior.
@@ -53,7 +78,8 @@ The current public alpha is [0.5.1 build 46](https://github.com/nggurbanov/Drapl
 from source commit `5f76f076b784bc68e30cf329b6013ed9eacf24bb`.
 The tag identifies the application source; subsequent main-branch commits publish
 release metadata and the feed. DMG, updater ZIP, complete source snapshot and
-SHA-256 checksums accompany the release. The feed advertises the same signed ZIP.
+SHA-256 checksums accompany the release. Its automatic rollout was paused after
+the permission-identity regression; the feed currently advertises build 45.
 Build 46 has 380 checks and current installer, signature and packaging evidence
 described in [release readiness](RELEASE_READINESS.md). The first public alpha,
 0.5.0 build 45, remains the broader native-test baseline. Older build-13/15 draft

@@ -2,8 +2,19 @@
 # Build local artifacts and a signed candidate appcast. Does not publish anything.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-export DRAPLET_SIGNING_IDENTITY="${DRAPLET_SIGNING_IDENTITY:--}"
+case "${DRAPLET_SIGNING_IDENTITY:-}" in
+  ''|'-'|'auto')
+    echo 'Set DRAPLET_SIGNING_IDENTITY to an explicit stable certificate. Ad-hoc updates invalidate macOS privacy permissions.' >&2
+    exit 1
+    ;;
+esac
+export DRAPLET_SIGNING_IDENTITY
 bash scripts/build-dmg.sh
+signing_check=(.build/Draplet.app)
+if [ -n "${DRAPLET_PREVIOUS_RELEASE_APP:-}" ]; then
+  signing_check+=(--previous-app "$DRAPLET_PREVIOUS_RELEASE_APP")
+fi
+python3 scripts/check-release-signing.py "${signing_check[@]}"
 version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Resources/Info.plist)
 public_key=$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' Resources/Info.plist)
 sparkle="$PWD/.build/dependencies/sparkle-2.10.0"

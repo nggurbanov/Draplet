@@ -1,5 +1,17 @@
 # Alpha release validation — 0.5.1 build 46
 
+**Rollout paused on October 26:** the ad-hoc public update invalidated macOS
+Accessibility grants on an existing installation. The missing left arrow and
+right-arrow Settings fallback were consequences of that permission loss.
+Restoring the installation's previous certificate identity on the same 0.5.1
+code restored Accessibility, Screen Recording and both controls without new
+grants. The feed has been returned to build 45. See
+[permission recovery](UPDATES.md#permission-recovery-after-051).
+
+The installer fixtures below verified replacement and application preferences,
+not macOS permission preservation: their isolated identities had no privacy
+grants. This gap blocks further ad-hoc automatic releases.
+
 [0.5.1 Alpha](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.1) fixes the
 Pocket disclosure overlapping native system status items such as Sound/AirPods.
 Its source tag identifies commit `5f76f076b784bc68e30cf329b6013ed9eacf24bb`.
@@ -20,7 +32,8 @@ Validation was performed on macOS 27 / Apple silicon with one physical display.
 
 This patch does not claim a new run of the broader build-45 native suites below.
 Signing, supported architectures and known alpha limits remain unchanged. The
-feed advertises build 46 only after the public update ZIP was verified.
+feed initially advertised build 46 after the public ZIP was verified, and was
+subsequently rolled back because of the permission-identity regression.
 
 ## Previous release: 0.5.0 build 45
 
