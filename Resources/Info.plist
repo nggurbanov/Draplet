@@ -13,9 +13,11 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.5.1</string>
+	<string>0.5.2</string>
 	<key>CFBundleVersion</key>
-	<string>46</string>
+	<string>47</string>
+	<key>DrapletMinimumAutoupdateVersion</key>
+	<integer>47</integer>
 	<key>CFBundleIconFile</key>
 	<string>Draplet</string>
 	<key>LSMinimumSystemVersion</key>

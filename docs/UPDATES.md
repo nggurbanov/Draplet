@@ -15,7 +15,7 @@ updates remain scheduled for exit.
 
 Archives are Ed25519-signed and verified before extraction. This signature protects
 updates; it does not replace Developer ID/notarization or remove initial Gatekeeper
-approval for alpha downloads. Public alpha builds are ad-hoc signed. Local development
+approval for alpha downloads. Public builds through 0.5.1 are ad-hoc signed. Local development
 builds may use an Apple Development identity. Ad-hoc identity is tied to the
 binary hash, so an update can invalidate existing macOS privacy grants even
 when the bundle identifier stays the same. Automatic releases now require an
@@ -40,18 +40,66 @@ requirement. Test an authorized previous app updating to the candidate; the
 isolated installer fixture deliberately has no privacy grants and cannot verify
 their preservation. A signing-identity migration needs a separate acceptance test.
 
+The published 0.5.0/45 and 0.5.1/46 bundles both use hash-based ad-hoc requirements.
+A changed executable cannot satisfy those old requirements. Moving these
+installations to a certificate identity can require one-time authorization of
+Accessibility and Screen Recording; it cannot be promised as a transparent
+permission transfer. Subsequent updates must preserve the new identity.
+See [Apple TN3127](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements/).
+
+`DrapletMinimumAutoupdateVersion` in the signed app is permanently set to build
+47 for the first certificate-signed public successor. Every later appcast must
+retain this floor as `sparkle:minimumAutoupdateVersion`. Older clients get an
+interactive review instead of silent installation, including when they skip
+versions. The floor cannot decrease relative to the previous public app.
+Each release must keep a `data-permission-migration` notice explaining both
+permissions and their recovery, so clients skipping the first migration still
+see the warning. This does not block users from choosing the upgrade.
+See [Sparkle major upgrades](https://sparkle-project.org/documentation/publishing/#major-upgrades).
+The source identifies the unpublished 0.5.2/build-47 candidate. No
+certificate-signed public successor is published yet.
+
+## Persistent Alpha signing candidate
+
+An experimental self-signed `Draplet Alpha Distribution` identity is prepared
+for the next Alpha because Developer ID is not currently available. Its private
+key is in the signing machine's Keychain, with an encrypted backup outside the
+repository. Reuse it across releases; do not generate a new identity per build.
+No customer certificate installation or trust-setting changes are required
+for designated-requirement validation. This does not establish Developer ID
+trust or notarization. Apple recommends Developer ID for distribution and warns
+against treating self-signed certificates as an equivalent; see
+[Code Signing Tasks](https://developer.apple.com/library/archive/documentation/Security/Conceptual/CodeSigningGuide/Procedures/Procedures.html).
+
+Select this identity explicitly and set `DRAPLET_SIGNING_PROFILE=alpha`.
+This retains the existing unnotarized Alpha runtime policy. A self-signed
+certificate has no Apple Team ID: enabling hardened runtime would reject the
+bundled Sparkle framework, so the release gate rejects that combination.
+The default `apple` profile retains hardened runtime for Apple Development
+and Developer ID identities. Never change system trust settings to make a
+release pass. Public rollout remains paused until independent privacy acceptance.
+
 ## Prepare a release
 
 1. Increase both version and monotonically increasing `CFBundleVersion` in
    `Resources/Info.plist`. Add `updates/<version>.html` release notes.
 2. Run `bash test.sh`, then set `DRAPLET_SIGNING_IDENTITY` to an explicit stable
-   signing certificate and run `bash scripts/prepare-release.sh` on macOS.
-   Ad-hoc, unset and automatic identity selection are rejected. Set
-   `DRAPLET_PREVIOUS_RELEASE_APP` to the previous authorized app to check mutual
-   requirement compatibility; also verify its real permissions after updating.
+   signing certificate and `DRAPLET_PREVIOUS_RELEASE_APP` to the app unpacked
+   from the previous **public** release. Run `bash scripts/prepare-release.sh`
+   on macOS. Ad-hoc, unset and automatic identity selection are rejected.
+   A previous release reference is mandatory. The gate checks mutual designated
+   requirements, increasing builds, the signed migration floor and the generated
+   appcast. Incompatible identities are accepted only below that floor with
+   explicit permission-recovery notes. To check additional historical identities,
+   repeat `--previous-app` when invoking `scripts/check-release-signing.py`.
    It creates a DMG, symlink-preserving updater ZIP, SHA-256 file and candidate appcast
    and corresponding-source archive in ignored `dist/`. It does not upload or publish anything.
-3. Verify the actual N→N+1 update, failure paths, mounted DMG and current app behavior.
+3. Verify an authorized copy of the previous public app updating to the actual
+   signed candidate. Confirm Accessibility and Screen Recording remain granted
+   for compatible updates, both curtains work and settings/pins survive.
+   Test any deliberate one-time migration and its recovery separately. Also
+   verify failure paths, the mounted DMG and current app behavior. Isolated
+   no-permission fixtures alone do not satisfy this acceptance step.
 4. Prepare and verify GPL v3 corresponding source for the exact binary build.
    Include the matching application source, build/install scripts, vendored
    adaptations and license notices, plus required dependency sources and build
@@ -94,7 +142,7 @@ matching binary downloads. This does not publish the source or modify the feed.
 ## Isolated update fixture
 
 Build an ad-hoc app with `DRAPLET_SIGNING_IDENTITY=- bash build.sh`, then run
-`python3 scripts/prepare-update-test.py [good|bad-signature|network|scheduled]`. Serve
+`python3 scripts/prepare-update-test.py [good|bad-signature|network|scheduled|migration]`. Serve
 `.build/update-test-http` on loopback port 18734. `scheduled` disables background downloads to exercise the review/reminder flow.
 The fixtures have separate bundle
 identifiers and never start menu-bar engines, capture or permission prompts.
@@ -109,3 +157,44 @@ Fixtures re-sign the entire helper graph through `scripts/sign-app.sh`. They ref
 to overwrite a running host. Use an alphanumeric `DRAPLET_TEST_RUN_ID` for a fresh
 bundle/cache identity, or `DRAPLET_TEST_SIGNING_IDENTITY=auto` to exercise the local
 Apple Development graph. Ad-hoc is the default; do not mix helper and host identities.
+
+For privacy acceptance, sign both fixture versions with the intended permanent
+certificate and set `DRAPLET_TEST_PRIVACY_REPORT` to a local report path before
+preparing a fresh `good` fixture. **Launch through macOS LaunchServices/UI, not
+as a shell child.** Shell children can inherit the terminal host's TCC grants;
+even a fresh unapproved bundle returned both permissions true in that context.
+The same code launched independently returned both false.
+
+`scripts/check-update-permissions.py --fixture <fixture> --report <reports>
+--phase baseline|before|after` reads the fixture's own report. It requires a live
+launchd-parented app and a fresh denied baseline. Explicitly authorize only that
+disposable app in System Settings, enable automatic checking in its isolated
+domain, relaunch normally and wait for staging. Record `before`, quit through
+the UI to install, and relaunch the successor before checking `after`.
+Both permissions must stay true, build 100 must become 101 in a new process,
+and fixture preferences must survive. Remove only the test app's two permission
+entries afterwards. The report contains booleans and updater/process metadata;
+this probe does not capture or save screen content.
+
+For the legacy migration check, set `DRAPLET_TEST_BASE_APP` to an unpacked public
+app and use a fresh `DRAPLET_TEST_RUN_ID`, then prepare `migration`. Its feed uses
+`minimumAutoupdateVersion=101`. With the loopback server running, execute:
+
+```sh
+python3 scripts/qa-update-migration.py \
+  --fixture .build/update-test.migration.<runid> --report .build/migration-<runid>
+```
+
+It asserts that automatic downloads remain enabled, interactive review is
+pending, no update is staged, ordinary quit leaves build 100 installed and
+fixture preferences survive. These copies use public application code with
+isolated test identifiers and version metadata; they still do not test privacy
+grants. Prepare and run cases sequentially because `/migration` points to the
+most recently prepared feed.
+
+`scripts/qa-release-signing.py` checks the release gate against real certificate
+and ad-hoc signatures. Supply `--candidate`, `--compatible-previous`,
+`--incompatible-previous`, `--adhoc` and an explicit `--signing-identity` matching
+the compatible reference. It signs only temporary copies, never launches them,
+and checks migration boundaries, missing references/notes, incompatible
+automatic updates, policy persistence and increasing build numbers.

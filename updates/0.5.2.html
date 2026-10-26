@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Draplet 0.5.2 Alpha</title></head>
+<body>
+<h2>Draplet 0.5.2 Alpha</h2>
+<p>Uses a persistent application signing identity so future updates signed with
+the same certificate can retain macOS privacy permissions.</p>
+<p data-permission-migration><strong>Upgrading from 0.5.0 or 0.5.1:</strong>
+these older builds used ad-hoc signatures. This signing transition can require
+authorizing <strong>Accessibility</strong> and <strong>Screen Recording</strong>
+again. The upgrade is offered for review and will not install silently.</p>
+<p>After updating, open System Settings → Privacy &amp; Security → Accessibility
+and authorize the current Draplet in Applications. If an enabled old entry does
+not apply, remove it and add the current app. Also check Screen &amp; System Audio
+Recording, then quit and reopen Draplet if macOS requests it. Draplet captures
+no audio. Preferences and pinned icons are retained.</p>
+<p>This remains an unnotarized Alpha. The application certificate is self-signed;
+it does not provide Developer ID verification or remove Gatekeeper approval on
+first launch. No certificate installation or trust-setting changes are needed
+on users’ Macs.</p>
+<ul>
+<li>Retains the Sound/AirPods overlap fix from 0.5.1.</li>
+<li>Release checks reject incompatible silent updates and preserve the review
+requirement for older installations across future versions.</li>
+</ul>
+</body>
+</html>

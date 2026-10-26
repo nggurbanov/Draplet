@@ -12,6 +12,22 @@ The installer fixtures below verified replacement and application preferences,
 not macOS permission preservation: their isolated identities had no privacy
 grants. This gap blocks further ad-hoc automatic releases.
 
+**Update safeguards verified on October 26:** the release gate now requires a
+previous public app, checks actual designated-requirement compatibility and
+rejects silent identity changes. The permanent automatic-update floor is
+embedded in the candidate and cannot decrease in a successor. Recovery notes
+are required even in later releases, for clients that skip the first migration.
+Fifteen real-signature gate cases passed, including the self-signed runtime
+incompatibility check. Isolated copies of the published
+build-45 and build-46 code both required interactive review with automatic
+downloads enabled; neither staged the migration or replaced itself on ordinary
+exit, and fixture preferences survived. These checks verify rollout gating,
+not TCC grant preservation. A persistent self-signed Alpha candidate is now
+prepared; an independent authorized N→N+1 acceptance run is still required
+before resuming publication. Shell-child permission probes inherited the host's
+grants and were rejected as acceptance evidence; a LaunchServices launch of the
+fresh fixture correctly returned both permissions false.
+
 [0.5.1 Alpha](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.1) fixes the
 Pocket disclosure overlapping native system status items such as Sound/AirPods.
 Its source tag identifies commit `5f76f076b784bc68e30cf329b6013ed9eacf24bb`.
@@ -81,8 +97,9 @@ actions are checked separately.
 
 ```sh
 bash test.sh
-DRAPLET_SIGNING_IDENTITY=- bash build.sh
-bash scripts/prepare-release.sh
+DRAPLET_SIGNING_IDENTITY='<stable certificate>' \
+DRAPLET_PREVIOUS_RELEASE_APP='/path/to/previous-public/Draplet.app' \
+  bash scripts/prepare-release.sh
 ```
 
 Build and packaging require macOS. Release signing additionally needs the
@@ -97,7 +114,13 @@ For native fixture setup and safe restoration, see
 - `scripts/qa-pocket-compatibility.py`: native compatibility-slot return,
   disclosure-position preservation, persistence and glyph refresh.
 - `scripts/prepare-update-test.py`: isolated good, bad-signature, unavailable-feed
-  and scheduled-review updater fixtures. See [UPDATES.md](UPDATES.md).
+  scheduled-review and legacy-migration updater fixtures. See [UPDATES.md](UPDATES.md).
+- `scripts/qa-update-migration.py`: real legacy-client review, no staging and
+  no install-on-quit checks against an isolated migration fixture.
+- `scripts/qa-release-signing.py`: real-signature policy checks using temporary
+  copies and an explicit test certificate.
+- `scripts/check-update-permissions.py`: independent native privacy evidence
+  with a mandatory denied baseline, authorized predecessor and successor.
 - `scripts/measure-resources.py`: bounded CPU/memory sampling; see
   [PERFORMANCE.md](PERFORMANCE.md).
 

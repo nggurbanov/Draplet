@@ -10,7 +10,7 @@ ET.register_namespace("sparkle", "http://www.andymatuschak.org/xml-namespaces/sp
 
 root = pathlib.Path(__file__).resolve().parents[1]
 scenario = sys.argv[1] if len(sys.argv) > 1 else 'good'
-assert scenario in ('good', 'bad-signature', 'network', 'scheduled')
+assert scenario in ('good', 'bad-signature', 'network', 'scheduled', 'migration')
 suffix = '' if scenario == 'good' else '.' + scenario.replace('-', '')
 run_id = os.environ.get('DRAPLET_TEST_RUN_ID', '')
 if run_id:
@@ -26,7 +26,8 @@ for kind in ('installed', 'release'):
         raise SystemExit('Quit the existing update fixture before preparing another run.')
 for kind, build in [('installed', '100'), ('release', '101')]:
     app = base / kind / 'Draplet Update Test.app'
-    subprocess.run(['ditto', str(root / '.build/Draplet.app'), str(app)], check=True)
+    source_app = pathlib.Path(os.environ.get('DRAPLET_TEST_BASE_APP', str(root / '.build/Draplet.app')))
+    subprocess.run(['ditto', str(source_app), str(app)], check=True)
     info = app / 'Contents/Info.plist'
     data = plistlib.loads(info.read_bytes())
     data.update(CFBundleIdentifier='com.tyrell.Draplet.UpdateTest' + suffix, CFBundleName='Draplet Update Test',
@@ -36,6 +37,8 @@ for kind, build in [('installed', '100'), ('release', '101')]:
                 NSAppTransportSecurity={'NSAllowsLocalNetworking': True})
     if scenario == 'scheduled':
         data['SUAutomaticallyUpdate'] = False
+    if report := os.environ.get('DRAPLET_TEST_PRIVACY_REPORT'):
+        data['DrapletPrivacyTestReport'] = str(pathlib.Path(report).resolve())
     info.write_bytes(plistlib.dumps(data))
     subprocess.run(['bash', str(root / 'scripts/sign-app.sh'), str(app), os.environ.get('DRAPLET_TEST_SIGNING_IDENTITY', '-')], check=True)
 archive_dir = base / 'feed'
@@ -43,16 +46,21 @@ archive_dir.mkdir(exist_ok=True)
 subprocess.run(['ditto', '-c', '-k', '--sequesterRsrc', '--keepParent',
                 str(base / 'release/Draplet Update Test.app'), str(archive_dir / 'Draplet-0.5.1.zip')], check=True)
 (archive_dir / 'appcast.xml').unlink(missing_ok=True)
-subprocess.run([str(root / '.build/dependencies/sparkle-2.10.0/bin/generate_appcast'),
+appcast_args = [str(root / '.build/dependencies/sparkle-2.10.0/bin/generate_appcast'),
                 '--account', 'DrapletUpdates', '--download-url-prefix', 'http://127.0.0.1:18734/' + scenario + '/',
-                '--maximum-deltas', '0', '--critical-update-version', '', str(archive_dir)], check=True)
+                '--maximum-deltas', '0']
+appcast_args += ['--major-version', '101'] if scenario == 'migration' else ['--critical-update-version', '']
+subprocess.run([*appcast_args, str(archive_dir)], check=True)
 if scenario == 'bad-signature':
     archive = archive_dir / 'Draplet-0.5.1.zip'
     with archive.open('ab') as output:
         output.write(b'corruption-for-EdDSA-test')
     feed = archive_dir / 'appcast.xml'
     tree = ET.parse(feed)
-    tree.find('./channel/item/enclosure').set('length', str(archive.stat().st_size))
+    enclosure = tree.find('./channel/item/enclosure')
+    if enclosure is None:
+        raise SystemExit('Generated update feed has no enclosure')
+    enclosure.set('length', str(archive.stat().st_size))
     tree.write(feed, encoding='utf-8', xml_declaration=True)
 # The HTTP root is a directory of isolated scenario symlinks.
 http_root = root / '.build/update-test-http'

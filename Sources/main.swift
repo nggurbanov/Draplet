@@ -39,6 +39,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settings = SettingsController(prefs: prefs, requestPermission: {}, replaceHiddenBar: {},
                                           revealBoth: {}, pause: {}, previewAnimations: {})
             settings.show()
+            if let report = Bundle.main.object(forInfoDictionaryKey: "DrapletPrivacyTestReport") as? String {
+                writePrivacyTestReport(report)
+                let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in self?.writePrivacyTestReport(report) }
+                pulse = timer
+                RunLoop.main.add(timer, forMode: .common)
+            }
             if CommandLine.arguments.contains("--test-controls") { testControls() }
             return
         }
@@ -124,6 +130,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { NSApp.terminate(nil) }
         }
         NSLog("Draplet ready; accessibility=%d; nativeVisibility=%d", wasAuthorized, HBNativeVisibilityIsAvailable())
+    }
+    private func privacyTestStatus() -> [String: Any] {
+        ["accessibility": AXIsProcessTrusted(), "screenRecording": CGPreflightScreenCaptureAccess(),
+         "build": Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
+         "pid": getpid(), "parentPID": getppid(), "ready": AppUpdater.shared.readyVersion ?? "",
+         "automaticDownloads": AppUpdater.shared.automaticDownloads]
+    }
+    private func writePrivacyTestReport(_ path: String) {
+        // Only enabled by explicitly marked disposable installer bundles.
+        // A normal LaunchServices launch is required: command-line children can
+        // inherit their parent's TCC authorization and give false acceptance.
+        if let data = try? JSONSerialization.data(withJSONObject: privacyTestStatus(), options: .sortedKeys) {
+            try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        }
     }
     func applyPreferences() {
         guard !terminating else { return }
@@ -299,6 +319,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         output["settingsVisible"] = self.settings.window?.isVisible ?? false
                         let data = try! JSONSerialization.data(withJSONObject: output, options: .sortedKeys)
                         print(String(data: data, encoding: .utf8)!, terminator: "\n"); fflush(stdout)
+                    case "privacy-status":
+                        // Read-only acceptance probe, also safe in installer
+                        // fixtures where the menu-bar controllers are absent.
+                        let data = try! JSONSerialization.data(withJSONObject: self.privacyTestStatus(), options: .sortedKeys)
+                        print(String(decoding: data, as: UTF8.self)); fflush(stdout)
                     case "update-status":
                         let update = AppUpdater.shared
                         let status: [String: Any] = ["status": update.status, "ready": update.readyVersion ?? "",
