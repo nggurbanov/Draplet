@@ -10,8 +10,7 @@ A free, open-source macOS utility that keeps both sides of your menu bar tidy.
 Hide application menus on the left and selected status icons on the right,
 then reveal them with a click, a hover, or a keyboard shortcut.
 
-**Early alpha.** Draplet is changing quickly. The release candidate is 0.5.3;
-the latest published version is 0.5.2.
+**Early alpha.** Draplet is changing quickly. The current version is 0.5.3.
 Alpha downloads are not Developer ID signed or notarized.
 
 **Upgrading from 0.5.0 or 0.5.1:** this signing migration requires review and can
@@ -20,7 +19,7 @@ need one-time authorization of Accessibility and Screen Recording. Version
 If the right arrow opens Settings and the left arrow is missing, see
 [permission recovery](docs/UPDATES.md#permission-recovery-after-051).
 
-[Download 0.5.2 Alpha](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.2)
+[Download 0.5.3 Alpha](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.3)
 (Apple silicon).
 
 
@@ -127,19 +126,22 @@ Do not disable Gatekeeper or other system protections globally.
 bash test.sh
 ```
 
-The 0.5.3 build-48 candidate passes 405 lifecycle, policy, rendering and animation
+The 0.5.3 build-48 release passes 405 lifecycle, policy, rendering and animation
 checks and 11 native render/lifecycle checks. It skips unchanged drawing and
 presentation work, settles running transitions when Reduce Motion is enabled,
 and drains ScreenCaptureKit start/stop callbacks on normal quit. Native Live
 Quit exposed and verified a fix for a modal-run-loop hang. See the
 [Rune review and implementation evidence](docs/RUNE_ADOPTION.md) for exact scope.
 
-These render/lifecycle runs do not establish independent privacy-grant
-preservation or installation of a staged Sparkle update with capture active.
-The published 0.5.2 release verified compatible Alpha-to-Alpha permission
-preservation and the reviewed migration from old ad-hoc builds. The build-45
+An exact public 0.5.2 → 0.5.3 Sparkle update retained Accessibility,
+Screen Recording and preferences in independent LaunchServices processes;
+the successor's left/right controls and Live capture worked. A separate
+release-code fixture verified staged install-on-quit with Live capture active,
+callback drain, remaining closed and capture after restart. That fixture was
+a shell child and is functional integration evidence, not independent privacy
+acceptance. Update and Relaunch was not rerun for this release. The build-45
 baseline also passed 17 broader native scenarios and 12 separate publisher menu
-activations; those broader suites were not rerun for this candidate.
+activations; those broader suites were not rerun for this release.
 
 These are local alpha checks on macOS 27 / Apple silicon. Physical Command-drag,
 arbitrary publisher popovers, older macOS, Intel and multiple displays still need

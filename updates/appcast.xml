@@ -3,43 +3,44 @@
     <channel>
         <title>Draplet</title>
         <item>
-            <title>0.5.2</title>
-            <pubDate>Mon, 26 Oct 2026 16:49:09 +0300</pubDate>
+            <title>0.5.3</title>
+            <pubDate>Wed, 28 Oct 2026 09:33:04 +0300</pubDate>
             <link>https://github.com/nggurbanov/Draplet</link>
             <sparkle:minimumAutoupdateVersion>47</sparkle:minimumAutoupdateVersion>
-            <sparkle:version>47</sparkle:version>
-            <sparkle:shortVersionString>0.5.2</sparkle:shortVersionString>
+            <sparkle:version>48</sparkle:version>
+            <sparkle:shortVersionString>0.5.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.2</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <description><![CDATA[<!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><title>Draplet 0.5.2 Alpha</title></head>
+<head><meta charset="utf-8"><title>Draplet 0.5.3 Alpha</title></head>
 <body>
-<h2>Draplet 0.5.2 Alpha</h2>
-<p>Uses a persistent application signing identity so future updates signed with
-the same certificate can retain macOS privacy permissions.</p>
+<h2>Draplet 0.5.3 Alpha</h2>
+<ul>
+<li>Skips unnecessary cover drawing and repeated presentation-policy updates while preserving fresh backgrounds.</li>
+<li>Stops a moving curtain when Reduce Motion is enabled during the transition.</li>
+<li>Waits for screen-capture shutdown on normal quit, including streams still starting or retiring after a cached frame.</li>
+<li>Keeps shutdown responsive inside macOS's modal termination loop.</li>
+<li>Allows an unchanged frame to retry after a transient image-conversion failure.</li>
+</ul>
+<p>Existing animation styles and paces, pinned icons and preferences are retained.</p>
 <p data-permission-migration><strong>Upgrading from 0.5.0 or 0.5.1:</strong>
-these older builds used ad-hoc signatures. This signing transition can require
+these older builds used ad-hoc signatures. The signing transition can require
 authorizing <strong>Accessibility</strong> and <strong>Screen Recording</strong>
-again. The upgrade is offered for review and will not install silently.</p>
+again. These older installations must review the upgrade before installation.</p>
 <p>After updating, open System Settings → Privacy &amp; Security → Accessibility
 and authorize the current Draplet in Applications. If an enabled old entry does
 not apply, remove it and add the current app. Also check Screen &amp; System Audio
 Recording, then quit and reopen Draplet if macOS requests it. Draplet captures
-no audio. Preferences and pinned icons are retained.</p>
-<p>This remains an unnotarized Alpha. The application certificate is self-signed;
-it does not provide Developer ID verification or remove Gatekeeper approval on
-first launch. No certificate installation or trust-setting changes are needed
-on users’ Macs.</p>
-<ul>
-<li>Retains the Sound/AirPods overlap fix from 0.5.1.</li>
-<li>Release checks reject incompatible silent updates and preserve the review
-requirement for older installations across future versions.</li>
-</ul>
+no audio. Preferences and pinned icons do not need resetting.</p>
+<p>This release retains the persistent signing identity introduced in 0.5.2.
+It remains an unnotarized Alpha with a self-signed application certificate,
+not Apple Developer ID distribution. First launch may require Open Anyway.
+No certificate installation or system trust changes are needed.</p>
 </body>
 </html>
 ]]></description>
-            <enclosure url="https://github.com/nggurbanov/Draplet/releases/download/v0.5.2/Draplet-0.5.2.zip" length="4033674" type="application/octet-stream" sparkle:edSignature="9Ehu+Q6lQTsE7dYMIyBhrxboRH635tjANjJOc2uQ4hTFpH3i+zQWnleIdWKhqsI/9Ly9DzwYJFjQnIWN2cRXBw=="/>
+            <enclosure url="https://github.com/nggurbanov/Draplet/releases/download/v0.5.3/Draplet-0.5.3.zip" length="4044999" type="application/octet-stream" sparkle:edSignature="xc8kcr10i3uO7/ojqsrfXiPXzphgURBAjT0F3VOZ+XxWvat/P/6sQXCjYIM5QEMrPbpUWO/Q88lJtqU1JhOZAw=="/>
         </item>
     </channel>
 </rss>

@@ -65,7 +65,7 @@ docs/RELEASE_READINESS.md for current evidence and its limits.
 Draplet variant E: asymmetric terracotta curtain on the left, two ivory rings on a chocolate rail and three exposed chocolate dots. Production artwork lives under Resources/Brand and Resources/Installer. Settings concepts establish warm ivory/charcoal surfaces, restrained terracotta accents, native controls and compact navigation. Settings artwork is a style reference; choose native macOS interaction patterns rather than copying an image literally.
 
 ## Delivery
-Public alpha releases are distributed through nggurbanov/Draplet with a drag-to-Applications DMG and matching GPL source. Alpha downloads are ad-hoc signed, not Developer ID signed or notarized. Updates use one feed, automatic checks and persistent reminders; verified downloads install on normal quit or an explicit Update and Relaunch action. Keep the bundle identifier stable and validate any signing-identity transition separately.
+Public alpha releases are distributed through nggurbanov/Draplet with a drag-to-Applications DMG and matching GPL source. Since 0.5.2, Alpha downloads retain one persistent self-signed identity; they are not Developer ID signed or notarized. Updates use one feed, automatic checks and persistent reminders; verified downloads install on normal quit or an explicit Update and Relaunch action. Keep the bundle identifier and signing identity stable. Preserve the build-47 automatic-update floor and permission-recovery notes for older ad-hoc clients; validate any later signing-identity transition separately.
 
 ## Product principles
 - A quiet everyday utility; Settings should make each task obvious.

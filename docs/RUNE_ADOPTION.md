@@ -49,3 +49,18 @@ python3 scripts/qa-render-lifecycle.py --app .build/Draplet.app --report .build/
 The native suite requires an unlocked desktop, Draplet's existing Accessibility/Screen Recording access and no other Draplet instance. It uses process-only preference overrides, refuses to stop an existing user process, and records raw status/logs. Idle counters are observations rather than assertions because the foreground scene can change. The known main-queue Quit hang was reproduced before the modal-mode fix; its first failed run and process sample are separate local evidence.
 
 All native counters and reports are process-local; generated artifacts stay under `.build`. The candidate was exercised as a shell-launched child, not as an independent TCC fixture. A staged Sparkle install with active capture, physical Command-drag, other macOS versions, Intel, multiple displays and long-running animated wallpapers were not revalidated in this pass. The review does not establish battery savings, exact GPU cost, long-term leak freedom or elimination of every possible ScreenCaptureKit daemon failure.
+
+## Release follow-up — 2026-10-28
+
+[0.5.3 Alpha / build 48](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.3)
+ships these changes from source commit `38164235ba167eda6b11ec60db03c110e7fd9465`.
+Release acceptance subsequently closed the updater gaps above: an exact public
+47 → packaged 48 Sparkle update retained both privacy grants and preferences
+across independent LaunchServices launches, and the updated app's Live capture
+and both curtains worked. A separate candidate-code fixture installed a staged
+update on normal quit with Live capture active, drained its callbacks and stayed
+closed; a later launch resumed capture and retained a settings sentinel. The
+latter fixture was a shell child and does not establish independent TCC grants.
+All five public downloads matched local hashes before feed activation. See
+[release readiness](RELEASE_READINESS.md) for the distinct evidence scopes and
+remaining hardware/long-term limits.

@@ -1,20 +1,31 @@
-# Alpha release validation — 0.5.3 build 48 candidate
+# Alpha release validation — 0.5.3 build 48
 
 Version 0.5.3 retains the persistent self-signed Alpha identity introduced in
 0.5.2 and the permanent automatic-update floor of build 47. It improves native
-rendering and capture ownership without adding Rune or Rust. This section records
-candidate evidence; it does not claim publication or updater acceptance.
+rendering and capture ownership without adding Rune or Rust. Its packaged source
+is tagged at `38164235ba167eda6b11ec60db03c110e7fd9465`.
+[0.5.3 Alpha](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.3) was
+published on 2026-10-28 at 06:38:49 UTC. All five files downloaded through
+unauthenticated public URLs matched the local SHA-256 values and uploaded GitHub
+digests. The feed advertises build 48 with its permanent automatic-update floor
+of 47.
 Validation was performed on 2026-10-28, macOS 27.0.1 / Apple silicon with one
 physical display.
 
-| Candidate check | Result |
+| Release check | Result |
 | --- | --- |
-| Lifecycle, preferences, rendering and animation suite | 405 checks passed, including held capture callbacks and the modal-loop Quit regression |
-| Native render/lifecycle harness | 11 checks passed; Cached stream retirement, unchanged policy deliveries, repeated curtain toggles, Live Quit and startup Quit |
-| Live Quit with an active stream | One registered stream at cleanup; zero pending callbacks before exit, about 80 ms after the final run's Quit request |
+| Lifecycle, preferences, rendering and animation suite | 405 checks passed again for build 48, including held capture callbacks and the modal-loop Quit regression |
+| Native render/lifecycle harness | 11 checks passed before packaging on unchanged application code; Cached stream retirement, unchanged policy deliveries, repeated curtain toggles, Live Quit and startup Quit |
+| Live Quit with an active stream | Earlier native run had one registered stream at cleanup and zero pending callbacks before exit, about 80 ms after Quit |
 | Unchanged-scene observation | No new snapshots, display requests, draws or presentation-policy transitions during a 1.52-second observation; a changing scene separately produced new snapshots and redraws |
 | Native QA state preservation | Preference snapshots matched before/after; no controlled app left running; installed app not replaced |
 | Signed optimized candidate | Built without compiler warnings and satisfied the installed app's designated signing requirement |
+| Previous public release compatibility | Candidate and public build 47 have compatible designated requirements; automatic-update floor remains 47 |
+| Exact public 0.5.2 → 0.5.3 Sparkle update | Ordinary quit installed build 48 and stayed closed; independent LaunchServices predecessor and successor retained existing Accessibility and Screen Recording grants |
+| Updated native app behavior | Live capture and actual left toggle/right collapse-expand worked; preferences restored; installed `/Applications/Draplet.app` untouched and no TCC entries changed |
+| Active-capture updater integration | Candidate-code fixture 100 → 101 installed on ordinary quit with Live capture active; pending callbacks drained from one to zero, exit took 0.1323 seconds and app stayed closed |
+| Active-capture fixture restart | New build-101 process resumed Live capture and retained preference sentinel; both fixture versions' machine-code sections matched the candidate |
+| Release integrity | Mounted DMG signature, executable and Applications link verified; symlink-preserving ZIP, original Ed25519 signature, corrupt-byte rejection and all 127 corresponding-source hashes verified |
 
 The capture registry tracks streams before start through stop acknowledgement,
 serializes start/stop for each stream and waits for retiring streams during
@@ -23,12 +34,27 @@ deadline expiry are reported; neither is proof of successful daemon cleanup.
 Acknowledgements and the deadline run in modal mode as well as common modes,
 fixing the native Live-Quit hang reproduced during this pass.
 
-These native runs used a shell-launched app, so their access to capture is not
-independent LaunchServices/TCC acceptance. A staged Sparkle install with active
-capture and 0.5.2-to-0.5.3 permission preservation remain release acceptance work.
-The broader build-45 native suites were not rerun. No battery-savings, exact GPU
-cost or long-term leak claim follows from these short observations. See
-[the detailed source review and evidence](RUNE_ADOPTION.md).
+The exact public-build update used independently launched processes with parent
+PID 1 and the existing app's grants. Its predecessor was in Cached mode with
+capture stopped; its successor ran Live capture with one registered stream.
+This verifies the compatible public 47 → 48 transition on this Mac; it is not
+a new test of granting permissions to a fresh identity or an old ad-hoc migration.
+The separate active-capture fixture exercised the candidate's new Quit path:
+seven Live frames and a staged update were present before Quit. It ran as a
+shell child, so its permission booleans are not independent TCC acceptance.
+Local reports are `.build/release48/public-update/result.json` and
+`.build/release48/active-update/result.json`.
+
+Update and Relaunch, the broader build-45 native suites and old ad-hoc migration
+were not rerun for this release; their prior evidence remains below. No
+battery-savings, exact GPU cost or long-term leak claim follows from these
+short observations. See [the detailed source review and evidence](RUNE_ADOPTION.md).
+
+The ZIP and mounted DMG contain the same executable, SHA-256
+`e9195815659c35718796fd1825d18ab091e16caa7beea6e543f02d362ccee64f`.
+The clean corresponding-source manifest records the exact source commit and
+127 file hashes matching that Git tree. Later documentation/publication commits
+do not replace the tagged binary source or regenerate the release artifacts.
 
 ## Previous release: 0.5.2 build 47
 
@@ -216,6 +242,6 @@ The release includes a DMG, updater ZIP, SHA-256 file, candidate appcast and
 complete corresponding-source archive. The archive contains the application
 snapshot, license notices, build scripts and Sparkle 2.10.0 source with its
 vendored dependencies. SOURCE-MANIFEST.json records the source commit, file
-hashes and packaged executable hash. The production feed was activated only
-after the public downloads were verified. Follow [UPDATES.md](UPDATES.md) for
+hashes and packaged executable hash. The 0.5.3 production feed was activated only
+after all five public downloads were verified. Follow [UPDATES.md](UPDATES.md) for
 subsequent releases; do not move an existing release tag to a documentation commit.

@@ -131,19 +131,31 @@ on this feed; key rotation requires a separately tested migration.
 
 ## Current acceptance boundary
 
-The 0.5.3/build-48 release candidate passes 405 core checks and 11 native
+The 0.5.3/build-48 release passes 405 core checks and 11 native
 render/lifecycle checks, including Live Quit with a pending capture stream and
-the modal-loop scheduling regression. These shell-launched native runs do not
-verify independent privacy-grant preservation or a staged Sparkle install with
-capture active. Release acceptance and publication are pending; see
-[release readiness](RELEASE_READINESS.md) for the evidence and limits.
+the modal-loop scheduling regression. Its source is commit
+`38164235ba167eda6b11ec60db03c110e7fd9465`. An exact public build-47 → build-48
+Sparkle install-on-quit retained existing Accessibility and Screen Recording
+grants in independent LaunchServices processes; native left/right controls,
+Live capture and preferences also passed. A separate candidate-code fixture
+verified staged install-on-quit with Live capture active, drained callbacks,
+remaining closed and capture after restart. That fixture ran as a shell child
+and does not provide independent TCC acceptance. Update and Relaunch was not
+rerun for this release. Packaging, signatures and 127 exact corresponding-source
+file hashes passed. See
+[release readiness](RELEASE_READINESS.md) for the separate evidence boundaries.
 
-The current public alpha is [0.5.2 build 47](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.2),
-from source commit `4b25349f335109e7d5aa14b20d1884bf80c02679`.
-The tag identifies the application source; subsequent main-branch commits publish
-release metadata and the feed. DMG, updater ZIP, complete source snapshot and
-SHA-256 checksums accompany the release. The feed advertises build 47 with a
-permanent automatic-update floor of 47: earlier builds require review.
+The current public alpha is [0.5.3 build 48](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.3),
+published on 2026-10-28 at 06:38:49 UTC from source commit
+`38164235ba167eda6b11ec60db03c110e7fd9465`. The tag identifies the application
+source; subsequent main-branch commits publish release metadata and the feed.
+DMG, updater ZIP, complete source snapshot and SHA-256 checksums accompany the
+release. All five unauthenticated public downloads and uploaded GitHub asset
+digests matched local artifacts. The feed advertises build 48. The permanent
+automatic-update floor remains 47: earlier builds require review.
+
+The previous public release, [0.5.2 build 47](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.2),
+uses source commit `4b25349f335109e7d5aa14b20d1884bf80c02679`.
 Build 47 has 380 core checks, 15 signing-policy cases, a real authorized update
 and a reviewed public-code-to-Alpha migration described in
 [release readiness](RELEASE_READINESS.md). The first public alpha,
