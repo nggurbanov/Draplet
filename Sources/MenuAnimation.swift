@@ -21,6 +21,9 @@ enum AnimationPace: String, CaseIterable {
 enum MenuMaskDrawing {
     static func draw(in bounds: NSRect, progress: Double, style: BarAnimation,
                      mirrored: Bool = false, extent: CGFloat? = nil, background: (() -> Void)? = nil) {
+        // An uncovered (or empty) mask contributes no pixels. Avoid creating an
+        // offscreen layer and drawing a backdrop that source-in would discard.
+        guard min(1, max(0, progress)) < 1, !bounds.isEmpty else { return }
         guard let background, let context = NSGraphicsContext.current?.cgContext else {
             drawAlpha(in: bounds, progress: progress, style: style, mirrored: mirrored, extent: extent)
             return
@@ -70,11 +73,21 @@ protocol TransitionCover: AnyObject {
 
 final class RightMenuCover: TransitionCover {
     final class View: NSView {
-        var progress = 1.0 { didSet { needsDisplay = true } }
-        var style = BarAnimation.curtain { didSet { needsDisplay = true } }
-        var revealExtent: CGFloat? { didSet { needsDisplay = true } }
+        var progress = 1.0 { didSet { if oldValue != progress { needsDisplay = true } } }
+        var style = BarAnimation.curtain { didSet { if oldValue != style { needsDisplay = true } } }
+        var revealExtent: CGFloat? { didSet { if oldValue != revealExtent { needsDisplay = true } } }
+        private(set) var drawCount = 0
+        private(set) var displayRequestCount = 0
+        override var needsDisplay: Bool {
+            get { super.needsDisplay }
+            set {
+                if newValue { displayRequestCount += 1 }
+                super.needsDisplay = newValue
+            }
+        }
         override var isOpaque: Bool { false }
         override func draw(_ dirtyRect: NSRect) {
+            drawCount += 1
             NSColor.clear.setFill(); bounds.fill(using: .copy)
             MenuMaskDrawing.draw(in: bounds, progress: progress, style: style, mirrored: true, extent:revealExtent) {
                 MenuBarBackdrop.shared.draw(in: self.bounds, screenRect: self.window?.frame ?? .zero, operation: .sourceIn)
@@ -86,11 +99,18 @@ final class RightMenuCover: TransitionCover {
     private var wantsVisible = false
     private var presentationSuppressed = false
     private var revealExtent: CGFloat?
+    private let reduceMotion: () -> Bool
+    init(reduceMotion: @escaping () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }) {
+        self.reduceMotion = reduceMotion
+    }
     var isVisible: Bool { wantsVisible }
     var isPresented: Bool { panel?.isVisible == true }
     var windowNumber: Int? { isPresented ? panel?.windowNumber : nil }
     var maskingWindow: NSWindow? { isPresented ? panel : nil }
     var progress: Double { (panel?.contentView as? View)?.progress ?? 1 }
+    var drawCount: Int { (panel?.contentView as? View)?.drawCount ?? 0 }
+    var displayRequestCount: Int { (panel?.contentView as? View)?.displayRequestCount ?? 0 }
+    var animationTimerActive: Bool { timer?.isValid == true }
     func prepare(frame: NSRect, progress: Double, style: BarAnimation) {
         cancelAnimation()
         wantsVisible = true
@@ -106,7 +126,7 @@ final class RightMenuCover: TransitionCover {
             window.contentView = View(frame: NSRect(origin: .zero, size: frame.size))
             panel = window
         }
-        panel?.setFrame(frame, display: false)
+        if panel?.frame != frame { panel?.setFrame(frame, display: false) }
         if let view = panel?.contentView as? View {
             view.progress = progress; view.style = style
             if progress == 0 || progress == 1 { view.revealExtent = revealExtent }
@@ -124,10 +144,11 @@ final class RightMenuCover: TransitionCover {
         cancelAnimation()
         guard let view = panel?.contentView as? View else { completion(); return }
         let from = view.progress, started = ProcessInfo.processInfo.systemUptime
-        guard duration > 0, abs(target - from) > 0.001 else { view.progress = target; completion(); return }
+        guard duration > 0, !reduceMotion(), abs(target - from) > 0.001 else { view.progress = target; completion(); return }
         let frames = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self, weak view] _ in
             guard let self, let view else { return }
-            let t = min(1, (ProcessInfo.processInfo.systemUptime - started) / duration)
+            // Display accessibility options can change while a curtain moves.
+            let t = self.reduceMotion() ? 1 : min(1, (ProcessInfo.processInfo.systemUptime - started) / duration)
             let eased = target > from ? 1 - pow(1 - t, 3) : t * t * (3 - 2 * t)
             view.progress = from + (target - from) * eased
             if t >= 1 { self.cancelAnimation(); completion() }

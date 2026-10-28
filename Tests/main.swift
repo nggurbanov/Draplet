@@ -70,6 +70,86 @@ gate.finish(firstFrame)
 check(gate.begin() == nil, "A stale delivery cannot unlock a new stream's pending frame")
 gate.finish(replacementFrame)
 check(gate.begin() != nil, "Finishing delivery admits the next live frame")
+// ScreenCaptureKit may deliver a Cached frame before startCapture completes.
+// Hold real completion-shaped callbacks to exercise both orderings without
+// granting a fixture access to the screen or relying on scheduler timing.
+let captureOwnerA = NSObject(), captureOwnerB = NSObject()
+let captureA = ObjectIdentifier(captureOwnerA), captureB = ObjectIdentifier(captureOwnerB)
+var captureStartA: ((Error?) -> Void)?, captureStopA: ((Error?) -> Void)?
+var captureStartB: ((Error?) -> Void)?, captureStopB: ((Error?) -> Void)?
+var issuedStops = 0, startCompletions = 0, captureDrains = 0, stopErrors = 0
+let captures = CaptureLifecycle(stoppedWithError: { _ in stopErrors += 1 })
+captures.start(id: captureA, start: { captureStartA = $0 }, stop: {
+    issuedStops += 1; captureStopA = $0
+}, completion: { _ in startCompletions += 1 })
+captures.stop(id: captureA); captures.stop(id: captureA)
+check(issuedStops == 0 && captures.pendingCount == 1,
+      "Retiring a first-frame stream while start is pending defers its stop and retains ownership")
+captures.whenDrained { captureDrains += 1 }
+captureStartA?(nil)
+check(issuedStops == 1 && startCompletions == 1 && captureDrains == 0,
+      "The start acknowledgement issues one deferred stop without reporting a premature drain")
+captures.start(id: captureB, start: { captureStartB = $0 }, stop: {
+    issuedStops += 1; captureStopB = $0
+}, completion: { _ in startCompletions += 1 })
+captureStartB?(nil); captures.stopAll(); captures.stopAll()
+check(issuedStops == 2 && captures.pendingCount == 2,
+      "Quit tracks an older retiring Cached stream and its replacement without duplicate stops")
+captureStopA?(nil)
+check(captures.pendingCount == 1 && captureDrains == 0,
+      "Finishing an older stop cannot release the replacement or finish quit")
+captureStopB?(nil)
+check(captures.pendingCount == 0 && captureDrains == 1,
+      "Quit may proceed only after every stream has acknowledged its stop")
+captureStartA?(nil); captureStopA?(nil); captureStopB?(nil)
+check(startCompletions == 2 && issuedStops == 2 && captureDrains == 1,
+      "Late duplicate acknowledgements cannot restart or retire a newer session")
+captures.whenDrained { captureDrains += 1 }
+check(captureDrains == 2, "Quitting with no capture work completes immediately")
+let failedCaptureOwner = NSObject()
+var failedCaptureStop: ((Error?) -> Void)?
+var reportedStartError = false
+captures.start(id: ObjectIdentifier(failedCaptureOwner), start: { done in
+    done(NSError(domain: "CaptureFixture", code: 1))
+}, stop: { failedCaptureStop = $0 }, completion: { reportedStartError = $0 != nil })
+check(reportedStartError && captures.pendingCount == 1 && failedCaptureStop != nil,
+      "A failed start still retires any partially allocated daemon-side capture")
+failedCaptureStop?(NSError(domain: "CaptureFixture", code: 2))
+check(captures.pendingCount == 0 && stopErrors == 1,
+      "A stop failure is reported and does not leave quit waiting forever")
+// AppKit's terminateLater enters this modal loop even if Quit originated in a
+// main-queue block. DispatchQueue.main.async replies would deadlock here.
+var modalCaptureDrained = false, modalCaptureTimedOut = false, modalDeadlineFired = false
+DispatchQueue.main.async {
+    let owner = NSObject(), lifecycle = CaptureLifecycle()
+    lifecycle.start(id: ObjectIdentifier(owner), start: { reply in
+        CaptureRunLoop.perform { reply(nil) }
+    }, stop: { reply in
+        CaptureRunLoop.perform { reply(nil) }
+    }, completion: { _ in })
+    lifecycle.stopAll()
+    lifecycle.whenDrained {
+        modalCaptureDrained = true
+        // AppKit's reply ends its nested loop; mirror that boundary here.
+        CFRunLoopStop(CFRunLoopGetMain())
+    }
+    let deadline = CaptureRunLoop.deadline(after: 0.1) { modalCaptureTimedOut = true }
+    let limit = Date().addingTimeInterval(0.2)
+    while !modalCaptureDrained && !modalCaptureTimedOut && Date() < limit {
+        RunLoop.current.run(mode: .modalPanel, before: limit)
+    }
+    deadline.invalidate()
+    let hungProviderDeadline = CaptureRunLoop.deadline(after: 0.01) { modalDeadlineFired = true }
+    let deadlineLimit = Date().addingTimeInterval(0.1)
+    while !modalDeadlineFired && Date() < deadlineLimit {
+        RunLoop.current.run(mode: .modalPanel, before: deadlineLimit)
+    }
+    hungProviderDeadline.invalidate()
+}
+RunLoop.main.run(until: Date().addingTimeInterval(0.25))
+check(modalCaptureDrained && !modalCaptureTimedOut,
+      "Capture start and stop replies drain inside AppKit's modal loop without main-queue reentry")
+check(modalDeadlineFired, "The quit deadline still fires in modal mode when a provider never answers")
 check(LeftCurtain.menuQueryInterval(revealed: false, nearMenu: false, tracking: false, popup: false) == 1,
       "Unused hidden menu geometry is queried at most once per second")
 for state in [(true,false,false,false),(false,true,false,false),(false,false,true,false),(false,false,false,true)] {
@@ -1144,6 +1224,90 @@ check(abs(fadeMask.colorAt(x: 10, y: 6)!.alphaComponent - 0.5) < 0.01 && abs(fad
       "Fade changes opacity uniformly instead of wiping")
 check(mask(.curtain, progress: 1).colorAt(x: 50, y: 6)!.alphaComponent == 0,
       "A fully revealed cover is completely transparent")
+// A transparent mask must skip its expensive background closure as well as
+// produce transparent pixels. Live wallpapers can otherwise pay for it every frame.
+let idleMaskBitmap = mask(.curtain, progress: 1)
+NSGraphicsContext.saveGraphicsState()
+NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: idleMaskBitmap)
+var backdropDraws = 0
+for style in [BarAnimation.curtain, .fade] {
+    for (bounds, progress) in [(NSRect(x: 0, y: 0, width: 100, height: 12), 1.0),
+                               (NSRect(x: 0, y: 0, width: 100, height: 12), 2.0),
+                               (NSRect.zero, 0.0)] {
+        MenuMaskDrawing.draw(in: bounds, progress: progress, style: style) {
+            backdropDraws += 1
+            NSColor.red.setFill(); bounds.fill(using: .sourceIn)
+        }
+    }
+}
+check(backdropDraws == 0 && idleMaskBitmap.colorAt(x: 50, y: 6)!.alphaComponent == 0,
+      "Fully open and empty masks perform no background work and leave pixels untouched")
+let partialMaskBounds = NSRect(x: 0, y: 0, width: 100, height: 12)
+MenuMaskDrawing.draw(in: partialMaskBounds, progress: 0.5, style: .fade) {
+    backdropDraws += 1
+    NSColor.red.setFill(); partialMaskBounds.fill(using: .sourceIn)
+}
+check(backdropDraws == 1 && abs(idleMaskBitmap.colorAt(x: 50, y: 6)!.alphaComponent - 0.5) < 0.01,
+      "A moving mask still draws the fresh background with the original alpha")
+NSGraphicsContext.restoreGraphicsState()
+
+let idleLeftView = LeftCurtain.CoverView(frame: partialMaskBounds)
+idleLeftView.applicationName = "Fixture"
+let measuredFixtureTitle = idleLeftView.titleWidth
+let initialLeftRequests = idleLeftView.displayRequestCount
+idleLeftView.applicationName = "Fixture"; idleLeftView.menuStart = 120
+idleLeftView.menuEnd = 420; idleLeftView.progress = 0; idleLeftView.animationStyle = .curtain
+check(idleLeftView.displayRequestCount == initialLeftRequests && idleLeftView.titleWidth == measuredFixtureTitle,
+      "Equal left-cover state preserves the title cache without requesting another draw")
+idleLeftView.applicationName = "A much longer fixture title"
+check(idleLeftView.displayRequestCount == initialLeftRequests + 1 && idleLeftView.titleWidth > measuredFixtureTitle,
+      "A real application-title change invalidates drawing and title measurement")
+let idleRightView = RightMenuCover.View(frame: partialMaskBounds)
+let initialRightRequests = idleRightView.displayRequestCount
+idleRightView.progress = 1; idleRightView.style = .curtain; idleRightView.revealExtent = nil
+check(idleRightView.displayRequestCount == initialRightRequests, "Equal right-cover state never requests a redundant draw")
+idleRightView.revealExtent = 80
+check(idleRightView.displayRequestCount == initialRightRequests + 1, "Changing the right curtain's reveal extent still invalidates its pixels")
+idleRightView.revealExtent = 80
+check(idleRightView.displayRequestCount == initialRightRequests + 1, "Repeating an unchanged reveal extent keeps the right cover at rest")
+
+// Policies are injected so accessibility behavior is verified without changing
+// the user's macOS display preferences or depending on their current setting.
+var reduceMotionDuringTransition = true
+let motionLeft = LeftCurtain(reduceMotion: { reduceMotionDuringTransition })
+let motionPanel = LeftCurtain.CoverPanel(contentRect: NSRect(x: -4000, y: 0, width: 100, height: 12),
+                                        styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+motionPanel.isReleasedWhenClosed = false
+motionPanel.contentView = idleLeftView; motionLeft.panel = motionPanel
+motionLeft.setReveal(true, "qa-reduced-motion")
+check(idleLeftView.progress == 1 && !motionLeft.animationRunning && motionLeft.animationTimer == nil,
+      "Reduced Motion reveals the left cover without scheduling animation work")
+reduceMotionDuringTransition = false
+motionLeft.setReveal(false, "qa-running-motion")
+check(motionLeft.animationRunning && motionLeft.animationTimer != nil,
+      "Ordinary left transitions retain their existing animation timer")
+reduceMotionDuringTransition = true; motionLeft.animate()
+check(idleLeftView.progress == 0 && !motionLeft.animationRunning && motionLeft.animationTimer == nil,
+      "Enabling Reduce Motion during a left transition settles the exact target and stops its timer")
+motionLeft.stop()
+
+let motionRight = RightMenuCover(reduceMotion: { reduceMotionDuringTransition })
+motionRight.prepare(frame: NSRect(x: -4000, y: 0, width: 100, height: 12), progress: 0, style: .curtain)
+var motionCompletions = 0
+motionRight.animate(to: 1, duration: 0.55) { motionCompletions += 1 }
+check(motionRight.progress == 1 && motionCompletions == 1,
+      "Reduced Motion reveals a right cover immediately and completes once")
+reduceMotionDuringTransition = false
+motionRight.animate(to: 0, duration: 0.25) { motionCompletions += 1 }
+check(motionRight.progress == 1 && motionCompletions == 1,
+      "An ordinary right transition starts from its current presented pose")
+reduceMotionDuringTransition = true
+RunLoop.main.run(until: Date().addingTimeInterval(0.08))
+check(motionRight.progress == 0 && motionCompletions == 2,
+      "Enabling Reduce Motion during a right transition settles on the next frame")
+RunLoop.main.run(until: Date().addingTimeInterval(0.3))
+check(motionCompletions == 2, "The retired right animation cannot repeat its native completion")
+motionRight.stop()
 func nativeFixture(light: Bool, transparent: Bool = false) -> CGImage {
     let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 200, pixelsHigh: 33, bitsPerSample: 8,
                               samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!

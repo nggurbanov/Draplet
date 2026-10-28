@@ -45,6 +45,12 @@ var manuallyCollapsed = false
 var onSettings: (() -> Void)?
 var isInteractingWithRight: () -> Bool = { false }
 private let prefs = Preferences.shared
+private let reduceMotion: () -> Bool
+
+init(reduceMotion: @escaping () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }) {
+    self.reduceMotion = reduceMotion
+    super.init()
+}
 
 func frameJSON(_ r: CGRect) -> [String: Double] {
     ["x": r.minX, "y": r.minY, "width": r.width, "height": r.height]
@@ -61,7 +67,12 @@ func emit(_ event: String, _ extras: [String: Any] = [:]) {
 }
 
 final class CoverView: NSView {
-    var applicationName = "" { didSet { measuredTitleWidth = nil; needsDisplay = true } }
+    var applicationName = "" {
+        didSet {
+            guard oldValue != applicationName else { return }
+            measuredTitleWidth = nil; needsDisplay = true
+        }
+    }
     private var measuredTitleWidth: CGFloat?
     var titleWidth: CGFloat {
         if let width = measuredTitleWidth { return width }
@@ -69,11 +80,20 @@ final class CoverView: NSView {
         measuredTitleWidth = width
         return width
     }
-    var menuStart: CGFloat = 120 { didSet { needsDisplay = true } }
-    var menuEnd: CGFloat = 420 { didSet { needsDisplay = true } }
-    var progress = 0.0 { didSet { needsDisplay = true } }
-    var animationStyle = BarAnimation.curtain { didSet { needsDisplay = true } }
+    var menuStart: CGFloat = 120 { didSet { if oldValue != menuStart { needsDisplay = true } } }
+    var menuEnd: CGFloat = 420 { didSet { if oldValue != menuEnd { needsDisplay = true } } }
+    var progress = 0.0 { didSet { if oldValue != progress { needsDisplay = true } } }
+    var animationStyle = BarAnimation.curtain { didSet { if oldValue != animationStyle { needsDisplay = true } } }
     var screenFrame = NSRect.zero
+    private(set) var drawCount = 0
+    private(set) var displayRequestCount = 0
+    override var needsDisplay: Bool {
+        get { super.needsDisplay }
+        set {
+            if newValue { displayRequestCount += 1 }
+            super.needsDisplay = newValue
+        }
+    }
     let font = NSFontManager.shared.convert(NSFont.menuBarFont(ofSize: 0), toHaveTrait: .boldFontMask)
     override var isOpaque: Bool { false }
 
@@ -82,6 +102,7 @@ final class CoverView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
+        drawCount += 1
         NSColor.clear.setFill()
         bounds.fill(using: .copy)
         // The title never swaps with the native title. Only command menus are uncovered.
@@ -186,7 +207,7 @@ func setReveal(_ open: Bool, _ reason: String, animated: Bool = true) {
     animationDuration = prefs.animationPace.duration(opening: open)
     animationFrameCount = 0
     animationFirstFrameDelay = nil
-    animationRunning = animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion && abs(target - view.progress) > 0.001
+    animationRunning = animated && !reduceMotion() && abs(target - view.progress) > 0.001
     if !animationRunning { view.progress = target; animationTimer?.invalidate(); animationTimer = nil }
     else if animationTimer == nil {
         let frames = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.animate() }
@@ -203,7 +224,8 @@ func animate() {
     let elapsed = ProcessInfo.processInfo.systemUptime - animationStart
     if animationFrameCount == 0 { animationFirstFrameDelay = elapsed }
     animationFrameCount += 1
-    let t = min(1, elapsed / animationDuration)
+    // Honor a newly enabled preference on the next active animation frame.
+    let t = reduceMotion() ? 1 : min(1, elapsed / animationDuration)
     let eased = animationTarget > animationFrom ? 1 - pow(1 - t, 3) : t * t * (3 - 2 * t)
     view.progress = animationFrom + (animationTarget - animationFrom) * eased
     updateClickTarget()

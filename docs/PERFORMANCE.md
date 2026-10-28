@@ -13,6 +13,11 @@ Draplet draws over the menu bar, observes other applications through Accessibili
 - Build Settings only when opened; release hosting views, toolbar and window when closed. Navigation/preferences survive reconstruction, and Dock visibility still follows Settings.
 - Keep one converted live frame pending for main at most, rejecting stale completion tokens after stream replacement. Release the Core Image context/caches after capture stops, and reuse the NSImage used to draw a background.
 - Compute native scanline medians with histograms rather than repeated sorting. The sampled upper-median rule and resulting background signatures are preserved, including odd/even samples and small images. Live remains capped at 30 fps and capture queue depth 3; unchanged fingerprints are skipped. No animation speed or capture resolution was reduced.
+- Fully revealed and empty masks skip both transparency-layer allocation and background drawing. Equal cover properties retain their existing drawing state and cached title measurement; real background notifications still invalidate pixels independently.
+- Live frames refresh backgrounds without repeating unchanged right-side presentation policies, running-application queries and status publications. Readiness, pinning and presentation transitions keep their own policy updates.
+- Both animation loops recheck Reduce Motion while moving, settle at the exact target and retire their timer. The normal curves and both saved paces remain unchanged.
+- Track every starting, running and retiring capture. A stop requested during startup waits for the start callback; a retired Cached stream stays owned until its stop callback. Normal quit uses AppKit's asynchronous termination reply to drain all streams, with a logged three-second timeout for an unresponsive provider. Stop errors are logged; an acknowledged stop error or timeout is not proof of daemon-side cleanup.
+- Record a frame fingerprint only after conversion succeeds, allowing an identical frame to retry after a transient conversion failure.
 
 ## Reproduce measurements
 
@@ -28,7 +33,11 @@ For an A/B comparison, use the same Mac, foreground app, wallpaper, Settings vis
 
 ## Validation scope
 
-The regression suite covers shared observations and same-ID Dock fades, immediate app changes, cache invalidation, stale capture deliveries, exact background medians, stationary indicator repaint requests, Settings release/recreation and preserved menu/fullscreen behavior. A captured WindowServer-rounded frame triggers the repaint regression before the fix.
+The regression suite covers shared observations and same-ID Dock fades, immediate app changes, cache invalidation, stale capture deliveries, exact background medians, stationary indicator repaint requests, Settings release/recreation and preserved menu/fullscreen behavior. It also drives held start/stop callbacks, concurrent retiring streams, failed and duplicate completions, fully revealed mask work, equal-state invalidation requests and Reduce Motion changes during an animation. A captured WindowServer-rounded frame triggers the indicator repaint regression before the fix.
+
+With `--test-controls`, `status` reports actual left/right `draws`, separate display requests, active animation timers and `backgroundCapturesPending`. `rightAnimation.presentationChanges` counts real suppression-state transitions; `qa-presentation-refresh` exercises a repeated delivery of the current state. These process-local counters describe different kinds of work: requesting display does not prove that AppKit drew or presented a frame.
+
+`python3 scripts/qa-render-lifecycle.py --app .build/Draplet.app --report .build/render-lifecycle-qa` exercises a built candidate without replacing the installed application. Run it individually on an unlocked Mac with Draplet's existing permissions and no other Draplet instance. It uses process-only preferences for Cached/Live launches and does not change animation paces or saved pins. See [Rune adoption notes](RUNE_ADOPTION.md) for the source comparison and exact validation scope.
 
 Historical measurements are scoped below; current release validation and its limits are in [RELEASE_READINESS.md](RELEASE_READINESS.md). No claim of zero GPU use, absence of long-term leaks, or universal battery improvement is made.
 

@@ -17,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var wasAuthorized = false
     var hiddenBarWasRunning = false
     var terminating = false
+    private var terminationReplyPending = false
+    private var terminationDeadline: Timer?
     var previewGeneration = 0
     var pocketDragProbe: PocketDragProbe?
     private var dragQAAssertion: NativeVisibilityAssertion?
@@ -252,10 +254,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settings?.show(); return true
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // Let AppKit finish termination so Sparkle can install a staged update.
-        // Cleanup stays idempotent and releases all native assertions.
+        if terminating { return terminationReplyPending ? .terminateLater : .terminateNow }
         cleanup()
-        return .terminateNow
+        guard MenuBarBackdrop.shared.pendingCaptureCount > 0 else {
+            NSLog("Draplet capture shutdown complete; %d capture stream(s) pending", MenuBarBackdrop.shared.pendingCaptureCount)
+            return .terminateNow
+        }
+        // Let AppKit and Sparkle complete their normal termination once every
+        // stream (including a retired Cached frame) has answered stopCapture.
+        terminationReplyPending = true
+        terminationDeadline = CaptureRunLoop.deadline(after: 3) { [weak self] in
+            guard let self, self.terminationReplyPending else { return }
+            NSLog("Draplet capture shutdown timed out with %d pending stream(s)", MenuBarBackdrop.shared.pendingCaptureCount)
+            self.finishTermination(timedOut: true)
+        }
+        MenuBarBackdrop.shared.whenCaptureStopped { [weak self] in self?.finishTermination() }
+        return .terminateLater
+    }
+    private func finishTermination(timedOut: Bool = false) {
+        guard terminationReplyPending else { return }
+        terminationReplyPending = false
+        terminationDeadline?.invalidate(); terminationDeadline = nil
+        if !timedOut {
+            NSLog("Draplet capture shutdown complete; %d capture stream(s) pending", MenuBarBackdrop.shared.pendingCaptureCount)
+        }
+        NSApp.reply(toApplicationShouldTerminate: true)
     }
     func applicationWillTerminate(_ notification: Notification) { cleanup() }
     func cleanup() {
@@ -264,8 +287,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ForegroundFullscreen.shared.onChange = nil
         MenuBarBackdrop.shared.onPresentationTick = nil
         permissionMonitor.stop()
-        pulse?.invalidate(); left.stop(); right?.stop(); MenuBarBackdrop.shared.stop()
-        // Capture work is stopped; drain its last-good writes before AppKit exits.
+        pulse?.invalidate(); left.stop(); right?.stop(); MenuBarBackdrop.shared.shutdown()
+        // Capture work is invalidated; drain last-good writes before AppKit exits.
         PocketImageCache.shared.flush()
         if let hotkey { UnregisterEventHotKey(hotkey) }
         if let eventHandler { RemoveEventHandler(eventHandler) }
@@ -273,7 +296,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NotificationCenter.default.removeObserver(observer)
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
         }
-        NSLog("Draplet cleanup complete")
+        NSLog("Draplet native UI cleanup complete; %d capture stream(s) pending", MenuBarBackdrop.shared.pendingCaptureCount)
     }
     private static func readControlLine() -> String? {
         // Swift readLine holds stdin's stdio lock while waiting. Foundation's
@@ -302,6 +325,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             "pace": self.prefs.animationPace.rawValue, "leftAnimation": self.prefs.animation(for: .left).rawValue,
                             "backgroundMode": self.prefs.backgroundMode.rawValue, "streaming": MenuBarBackdrop.shared.streaming,
                             "backgroundSnapshots": MenuBarBackdrop.shared.snapshotCount, "backgroundFrames": MenuBarBackdrop.shared.frameCount,
+                            "backgroundCapturesPending": MenuBarBackdrop.shared.pendingCaptureCount,
+                            "leftDraws": (self.left.panel?.contentView as? LeftCurtain.CoverView)?.drawCount ?? 0,
+                            "leftDisplayRequests": (self.left.panel?.contentView as? LeftCurtain.CoverView)?.displayRequestCount ?? 0,
+                            "leftAnimationTimerActive": self.left.animationTimer?.isValid == true,
                             "backgroundError": MenuBarBackdrop.shared.failure ?? "",
                             "backgroundReady": MenuBarBackdrop.shared.ready, "backgroundPermission": MenuBarBackdrop.shared.permission,
                             "systemPresentationSuspended": MenuBarBackdrop.shared.systemPresentationSuspended,
@@ -367,6 +394,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     case "cached": self.prefs.backgroundMode = .cached
                     case "live": self.prefs.backgroundMode = .live
                     case "background-refresh": MenuBarBackdrop.shared.refreshAppearance()
+                    case "qa-presentation-refresh": self.right.setPresentationSuppressed(MenuBarBackdrop.shared.presentationSuppressed)
                     case "background-save":
                         if let image = MenuBarBackdrop.shared.snapshot {
                             try? NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "/tmp/draplet-matched-background.png"))

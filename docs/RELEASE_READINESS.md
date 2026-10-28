@@ -1,4 +1,36 @@
-# Alpha release validation — 0.5.2 build 47
+# Alpha release validation — 0.5.3 build 48 candidate
+
+Version 0.5.3 retains the persistent self-signed Alpha identity introduced in
+0.5.2 and the permanent automatic-update floor of build 47. It improves native
+rendering and capture ownership without adding Rune or Rust. This section records
+candidate evidence; it does not claim publication or updater acceptance.
+Validation was performed on 2026-10-28, macOS 27.0.1 / Apple silicon with one
+physical display.
+
+| Candidate check | Result |
+| --- | --- |
+| Lifecycle, preferences, rendering and animation suite | 405 checks passed, including held capture callbacks and the modal-loop Quit regression |
+| Native render/lifecycle harness | 11 checks passed; Cached stream retirement, unchanged policy deliveries, repeated curtain toggles, Live Quit and startup Quit |
+| Live Quit with an active stream | One registered stream at cleanup; zero pending callbacks before exit, about 80 ms after the final run's Quit request |
+| Unchanged-scene observation | No new snapshots, display requests, draws or presentation-policy transitions during a 1.52-second observation; a changing scene separately produced new snapshots and redraws |
+| Native QA state preservation | Preference snapshots matched before/after; no controlled app left running; installed app not replaced |
+| Signed optimized candidate | Built without compiler warnings and satisfied the installed app's designated signing requirement |
+
+The capture registry tracks streams before start through stop acknowledgement,
+serializes start/stop for each stream and waits for retiring streams during
+normal AppKit termination. A three-second deadline bounds Quit. Stop errors and
+deadline expiry are reported; neither is proof of successful daemon cleanup.
+Acknowledgements and the deadline run in modal mode as well as common modes,
+fixing the native Live-Quit hang reproduced during this pass.
+
+These native runs used a shell-launched app, so their access to capture is not
+independent LaunchServices/TCC acceptance. A staged Sparkle install with active
+capture and 0.5.2-to-0.5.3 permission preservation remain release acceptance work.
+The broader build-45 native suites were not rerun. No battery-savings, exact GPU
+cost or long-term leak claim follows from these short observations. See
+[the detailed source review and evidence](RUNE_ADOPTION.md).
+
+## Previous release: 0.5.2 build 47
 
 [0.5.2 Alpha](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.2) uses the
 persistent self-signed Alpha identity. Its application source is tagged at
@@ -139,6 +171,8 @@ For native fixture setup and safe restoration, see
   transparent blocker; optional idle/pressed screenshots.
 - `scripts/qa-pocket-compatibility.py`: native compatibility-slot return,
   disclosure-position preservation, persistence and glyph refresh.
+- `scripts/qa-render-lifecycle.py`: unchanged drawing/presentation observations,
+  Cached/Live stream retirement, repeated toggles and drained normal Quit.
 - `scripts/prepare-update-test.py`: isolated good, bad-signature, unavailable-feed
   scheduled-review and legacy-migration updater fixtures. See [UPDATES.md](UPDATES.md).
 - `scripts/qa-update-migration.py`: real legacy-client review, no staging and
@@ -172,7 +206,7 @@ same installed successor after either success or failure.
 - Long-running animated wallpapers/icons, GPU/WindowServer attribution, battery
   and long-term memory stability have not been quantified for this release.
   Historical resource comparisons in PERFORMANCE.md are not current benchmarks.
-- Version 0.5.2 has a persistent self-signed Alpha identity, not Developer ID
+- Version 0.5.2 and later use a persistent self-signed Alpha identity, not Developer ID
   signing or notarization. First launch may require Open Anyway. Test a later signing-identity transition
   separately because macOS can require granting permissions again.
 

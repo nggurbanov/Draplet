@@ -99,6 +99,7 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
     private var revealAllMode = false
     private var stopped = false
     private var presentationSuppressed = false
+    private var presentationChangeCount = 0
     private var configuration = ""
     private var hoverTimer: Timer?
     private var mouseMonitor: Any?
@@ -268,13 +269,19 @@ final class RightCurtain: NSObject, MenuBarItemProvider {
     }
     var animationStatus: [String: Any] {
         ["style": animationStyle.rawValue, "expanded": transition.expanded,
-         "coverVisible": cover.isVisible,"coverPresented":cover.isPresented,"progress": cover.progress,"transitioning":transition.isTransitioning]
+         "coverVisible": cover.isVisible,"coverPresented":cover.isPresented,"progress": cover.progress,"transitioning":transition.isTransitioning,
+         "draws": cover.drawCount,"displayRequests": cover.displayRequestCount,
+         "timerActive": cover.animationTimerActive,"presentationChanges": presentationChangeCount]
     }
     func refreshBackground() { cover.refreshBackground();pocket?.refreshBackground() }
     func setPresentationSuppressed(_ suppressed: Bool) {
-        presentationSuppressed = suppressed
-        if suppressed { preparedLayout = nil }
+        // Live background frames still invalidate their pixels independently.
+        // Only a presentation change needs policy, native-item and status work.
         cover.setPresentationSuppressed(suppressed)
+        guard presentationSuppressed != suppressed else { return }
+        presentationSuppressed = suppressed
+        presentationChangeCount += 1
+        if suppressed { preparedLayout = nil }
         if suppressed { cancelHover(); dragController?.cancel(); pocketGeneration += 1; pocket?.close(reason:"system-presentation"); overflowButton.hide() }
         updatePinPolicy()
         updatePresentation()

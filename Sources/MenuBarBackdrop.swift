@@ -1,5 +1,5 @@
 import AppKit
-import ScreenCaptureKit
+@preconcurrency import ScreenCaptureKit
 import CoreImage
 
 // Reconstruct only the native background layer. Median scanlines discard menu
@@ -167,6 +167,11 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     private var composedDrawing: NSImage?
     private var treatment: NativeBarTreatment?
     private var stream: SCStream?
+    private let captureLifecycle = CaptureLifecycle {
+        NSLog("Draplet background capture stop: %@", $0.localizedDescription)
+    }
+    private var shuttingDown = false
+    var pendingCaptureCount: Int { captureLifecycle.pendingCount }
     private var nativeWindow: SCWindow?
     private var desktopFilter: SCContentFilter?
     private var desktopConfig: SCStreamConfiguration?
@@ -195,6 +200,7 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
     var snapshot: CGImage? { composedImage }
 
     func start(mode: BackgroundMode = .cached) {
+        guard !shuttingDown else { return }
         if systemPresentationSuspended { self.mode = mode; return }
         if active && self.mode == mode { return }
         guard failure == nil, permission else { self.mode = mode; return }
@@ -249,8 +255,9 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                     self.captureQueue.async { [self] in
                         self.queuedStreamID = captureID; self.frameDelivery.reset(); self.lastFingerprint = nil; self.singleFrameCapture = false
                     }
-                    try await capture.startCapture()
-                    guard token == self.generation else { try? await capture.stopCapture(); return }
+                    try await self.startCapture(capture)
+                    guard token == self.generation, self.active, self.stream === capture,
+                          self.acceptsCapture() else { self.stopCapture(capture); return }
                     let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in self?.refreshNativeTreatment() }
                     self.nativeRefresh = timer; RunLoop.main.add(timer, forMode: .common)
                 } else { self.captureDesktop() }
@@ -367,8 +374,9 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 self.captureQueue.async { [self] in
                     self.queuedStreamID = captureID; self.frameDelivery.reset(); self.lastFingerprint = nil; self.singleFrameCapture = true
                 }
-                try await capture.startCapture()
-                guard token == self.generation else { try? await capture.stopCapture(); return }
+                try await self.startCapture(capture)
+                guard token == self.generation, self.active, self.stream === capture,
+                      self.acceptsCapture() else { self.stopCapture(capture); return }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self, weak capture] in
                     guard let self, let capture, token == self.generation, self.stream === capture, self.desktopInFlight else { return }
                     self.fail("The menu-bar background did not deliver a complete frame. Please retry.")
@@ -378,6 +386,35 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 self.fail(error.localizedDescription)
             }
         }
+    }
+    @MainActor private func startCapture(_ capture: SCStream) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            captureLifecycle.start(id: ObjectIdentifier(capture), start: { done in
+                capture.startCapture { error in CaptureRunLoop.perform { done(error) } }
+            }, stop: { [self] done in
+                capture.stopCapture { error in
+                    CaptureRunLoop.perform {
+                        // Break the output's ownership only after capture has
+                        // finished; callbacks already queued are identity-gated.
+                        try? capture.removeStreamOutput(self, type: .screen)
+                        done(error)
+                    }
+                }
+            }, completion: { error in
+                if let error { continuation.resume(throwing: error) }
+                else { continuation.resume() }
+            })
+        }
+    }
+    private func stopCapture(_ capture: SCStream) {
+        captureLifecycle.stop(id: ObjectIdentifier(capture))
+    }
+    func shutdown() {
+        shuttingDown = true
+        stop()
+    }
+    func whenCaptureStopped(_ completion: @escaping () -> Void) {
+        captureLifecycle.whenDrained(completion)
     }
     private func refreshNativeTreatment() {
         // After a fullscreen/overview transition, first wait for WindowServer
@@ -445,10 +482,12 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
         }
         CVPixelBufferUnlockBaseAddress(buffer, .readOnly)
         guard fingerprint != lastFingerprint else { return }
-        lastFingerprint = fingerprint
         let image = CIImage(cvPixelBuffer: buffer)
         if imageContext == nil { imageContext = CIContext(options: [.cacheIntermediates: false]) }
         guard let cgImage = imageContext?.createCGImage(image, from: image.extent) else { return }
+        // A transient conversion miss must leave the same frame eligible for
+        // another attempt instead of poisoning the unchanged-frame shortcut.
+        lastFingerprint = fingerprint
         delivered = true
         DispatchQueue.main.async { [weak self, weak stream] in
             guard let self else { return }
@@ -459,7 +498,7 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
                 self.desktopInFlight = false; self.snapshotCount += 1
                 self.stream = nil
                 self.captureQueue.async { [self] in self.singleFrameCapture = false; self.queuedStreamID = nil; self.imageContext?.clearCaches(); self.imageContext = nil }
-                Task { try? await stream.stopCapture() }
+                self.stopCapture(stream)
             } else { self.frameCount += 1 }
             self.cleanImage = cgImage
             if self.awaitingDesktopAfterPresentation {
@@ -553,8 +592,8 @@ final class MenuBarBackdrop: NSObject, SCStreamOutput, SCStreamDelegate, @unchec
             queuedStreamID = nil; frameDelivery.reset()
             imageContext?.clearCaches(); imageContext = nil
         }
-        let capture = stream; stream = nil
-        if let capture { Task { try? await capture.stopCapture() } }
+        stream = nil
+        captureLifecycle.stopAll()
         nativeWindow = nil; desktopFilter = nil; desktopConfig = nil
         if !keepingSnapshot {
             systemPresentationSuspended = false

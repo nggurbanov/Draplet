@@ -13,6 +13,12 @@ manual checks remain available. With background downloads off, a persistent Sett
 action and a deferrable reminder open Sparkle’s review/download flow. Already staged
 updates remain scheduled for exit.
 
+Starting with 0.5.3, normal AppKit termination waits for ScreenCaptureKit
+start/stop callbacks before letting the existing Sparkle termination path
+continue. The wait is bounded to three seconds and reports stop errors or
+timeout; an error or timeout does not prove successful daemon cleanup. Capture
+callbacks and the deadline also run in AppKit's modal termination loop.
+
 Archives are Ed25519-signed and verified before extraction. This signature protects
 updates; it does not replace Developer ID/notarization or remove initial Gatekeeper
 approval for alpha downloads. Public builds through 0.5.1 are ad-hoc signed. Local development
@@ -63,7 +69,7 @@ The first certificate-signed public successor is 0.5.2/build 47.
 
 ## Persistent Alpha signing
 
-Version 0.5.2 uses a persistent self-signed `Draplet Alpha Distribution` identity
+Version 0.5.2 and later use a persistent self-signed `Draplet Alpha Distribution` identity
 because Developer ID is not currently available. Its private
 key is in the signing machine's Keychain, with an encrypted backup outside the
 repository. Reuse it across releases; do not generate a new identity per build.
@@ -124,6 +130,13 @@ but cannot publish a trusted update. Back up the signing key securely before rel
 on this feed; key rotation requires a separately tested migration.
 
 ## Current acceptance boundary
+
+The 0.5.3/build-48 release candidate passes 405 core checks and 11 native
+render/lifecycle checks, including Live Quit with a pending capture stream and
+the modal-loop scheduling regression. These shell-launched native runs do not
+verify independent privacy-grant preservation or a staged Sparkle install with
+capture active. Release acceptance and publication are pending; see
+[release readiness](RELEASE_READINESS.md) for the evidence and limits.
 
 The current public alpha is [0.5.2 build 47](https://github.com/nggurbanov/Draplet/releases/tag/v0.5.2),
 from source commit `4b25349f335109e7d5aa14b20d1884bf80c02679`.
